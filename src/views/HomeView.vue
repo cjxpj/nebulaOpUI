@@ -60,11 +60,23 @@
               <ElMenuItem index="adapter-yunhu"> 云湖 </ElMenuItem>
 
               <ElMenuItem index="adapter-feishu"> 飞书 </ElMenuItem>
+
+              <ElMenuItem index="adapter-secluded"> Secluded </ElMenuItem>
             </ElSubMenu>
 
             <ElMenuItem index="encrypted-dic">
               <ElIcon><Document /></ElIcon>
               <template #title> 加密词库 </template>
+            </ElMenuItem>
+
+            <ElMenuItem index="extension-deploy">
+              <ElIcon><Setting /></ElIcon>
+              <template #title> 扩展部署 </template>
+            </ElMenuItem>
+
+            <ElMenuItem index="doc-view">
+              <ElIcon><Document /></ElIcon>
+              <template #title> 查看文档 </template>
             </ElMenuItem>
           </ElMenu>
 
@@ -151,9 +163,15 @@ import AdapterQQ from '@/views/adapter/QQ.vue'
 import AdapterNapCat from '@/views/adapter/NapCat.vue'
 import AdapterYunHu from '@/views/adapter/YunHu.vue'
 import AdapterFeiShu from '@/views/adapter/FeiShu.vue'
+import AdapterSecluded from '@/views/adapter/Secluded.vue'
 
 // 词库商城
 import EncryptedLexicon from '@/views/EncryptedLexicon.vue'
+
+// 扩展部署
+import ExtensionDeploy from '@/views/ExtensionDeploy.vue'
+// 查看文档
+import DocViewer from '@/views/DocViewer.vue'
 
 const viewMap = {
   'load-page': LoadPage,
@@ -165,8 +183,11 @@ const viewMap = {
   'adapter-napcat': AdapterNapCat,
   'adapter-yunhu': AdapterYunHu,
   'adapter-feishu': AdapterFeiShu,
+  'adapter-secluded': AdapterSecluded,
 
   'encrypted-dic': EncryptedLexicon,
+  'extension-deploy': ExtensionDeploy,
+  'doc-view': DocViewer,
 }
 
 const DEFAULT_PAGE = 'basic-server'
@@ -254,5 +275,6 @@ onMounted(() => {
   flex: 1;
   padding: 16px;
   overflow: auto;
+  position: relative;
 }
 </style>

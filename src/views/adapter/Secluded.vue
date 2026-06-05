@@ -3,19 +3,17 @@ import { ref, onMounted } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch } from 'element-plus'
 import { config } from '@/config.js'
 
-/* ================= 表单数据 ================= */
 const form = ref({
-  open: false, // 启用
-  dic: 'private/bot/yunhu/dic.n', // 词库
-  path: 'yunhu-bot', // 访问路径
-  secret: '', // 密钥
+  open: false,
+  dic: 'private/bot/secluded',
+  address: '',
+  token: '',
 })
 
 const loading = ref(false)
 const saving = ref(false)
 const loadFailed = ref(false)
 
-/* ================= 初始化加载 ================= */
 async function loadConfig() {
   loading.value = true
   loadFailed.value = false
@@ -24,38 +22,26 @@ async function loadConfig() {
     const res = await fetch(config.apiBaseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'get_yunhu' }),
+      body: JSON.stringify({ type: 'get_secluded' }),
     })
 
     if (!res.ok) throw new Error()
 
     const data = await res.json()
-
     form.value.open = Boolean(data.open)
-    form.value.dic = data.dic || 'private/bot/yunhu/dic.n'
-    form.value.path = data.path || 'yunhu-bot'
-    form.value.secret = data.secret || ''
+    form.value.dic = data.dic || 'private/bot/secluded'
+    form.value.address = data.address || ''
+    form.value.token = data.token || ''
   } catch {
     loadFailed.value = true
-    ElMessage.error('获取 YunHu 配置失败')
+    ElMessage.error('获取 Secluded 配置失败')
   } finally {
     loading.value = false
   }
 }
 
-/* ================= 保存配置 ================= */
 async function saveConfig() {
   if (loadFailed.value) return
-
-  if (!form.value.path) {
-    ElMessage.error('访问路径不能为空')
-    return
-  }
-
-  if (!form.value.dic) {
-    ElMessage.error('词库路径不能为空')
-    return
-  }
 
   saving.value = true
   try {
@@ -63,16 +49,10 @@ async function saveConfig() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        type: 'save_yunhu',
-        data: {
-          open: form.value.open,
-          dic: form.value.dic,
-          path: form.value.path,
-          secret: form.value.secret,
-        },
+        type: 'save_secluded',
+        data: form.value,
       }),
     })
-
     ElMessage.success('配置已保存')
   } catch {
     ElMessage.error('保存配置失败')
@@ -87,8 +67,8 @@ onMounted(loadConfig)
 <template>
   <div class="page">
     <div class="page-header">
-      <h2 class="page-title">云湖</h2>
-      <p class="page-subtitle">配置云湖机器人对接参数</p>
+      <h2 class="page-title">Secluded</h2>
+      <p class="page-subtitle">配置 Secluded 对接参数</p>
     </div>
 
     <div class="panel-card">
@@ -103,18 +83,17 @@ onMounted(loadConfig)
         </ElFormItem>
 
         <ElFormItem label="词库">
-          <ElInput v-model="form.dic" placeholder="private/bot/yunhu/dic.n" :disabled="loadFailed" />
+          <ElInput v-model="form.dic" :disabled="loadFailed" />
         </ElFormItem>
 
-        <ElFormItem label="访问路径">
-          <ElInput v-model="form.path" placeholder="yunhu-bot" :disabled="loadFailed" />
+        <ElFormItem label="对接地址">
+          <ElInput v-model="form.address" placeholder="127.0.0.1:8080" :disabled="loadFailed" />
         </ElFormItem>
 
-        <ElFormItem label="密钥">
-          <ElInput v-model="form.secret" placeholder="xxx" show-password :disabled="loadFailed" />
+        <ElFormItem label="令牌">
+          <ElInput v-model="form.token" show-password :disabled="loadFailed" />
         </ElFormItem>
 
-        <!-- 操作区 -->
         <ElFormItem>
           <div class="form-actions">
             <ElButton type="primary" :loading="saving" :disabled="loadFailed" @click="saveConfig">
