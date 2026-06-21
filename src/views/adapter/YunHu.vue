@@ -2,6 +2,11 @@
 import { ref, onMounted } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch } from 'element-plus'
 import { config } from '@/config.js'
+import { apiPost } from '@/api.js'
+import { useMobile } from '@/composables/useMobile.js'
+
+/* ================= 移动端适配 ================= */
+const { isMobile } = useMobile()
 
 /* ================= 表单数据 ================= */
 const form = ref({
@@ -21,21 +26,14 @@ async function loadConfig() {
   loadFailed.value = false
 
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'get_yunhu' }),
-    })
-
-    if (!res.ok) throw new Error()
-
-    const data = await res.json()
+    const data = await apiPost({ type: 'get_yunhu' })
 
     form.value.open = Boolean(data.open)
     form.value.dic = data.dic || 'private/bot/yunhu/dic.n'
     form.value.path = data.path || 'yunhu-bot'
     form.value.secret = data.secret || ''
-  } catch {
+  } catch (e) {
+    console.error('获取 YunHu 配置失败:', e)
     loadFailed.value = true
     ElMessage.error('获取 YunHu 配置失败')
   } finally {
@@ -59,10 +57,7 @@ async function saveConfig() {
 
   saving.value = true
   try {
-    await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await apiPost({
         type: 'save_yunhu',
         data: {
           open: form.value.open,
@@ -70,11 +65,11 @@ async function saveConfig() {
           path: form.value.path,
           secret: form.value.secret,
         },
-      }),
-    })
+      })
 
     ElMessage.success('配置已保存')
-  } catch {
+  } catch (e) {
+    console.error('保存 YunHu 配置失败:', e)
     ElMessage.error('保存配置失败')
   } finally {
     saving.value = false
@@ -92,7 +87,7 @@ onMounted(loadConfig)
     </div>
 
     <div class="panel-card">
-      <ElForm :model="form" v-loading="loading" label-width="90px">
+      <ElForm :model="form" v-loading="loading" label-width="90px" :label-position="isMobile ? 'top' : 'right'">
         <ElFormItem label="启用">
           <ElSwitch
             v-model="form.open"
@@ -130,7 +125,6 @@ onMounted(loadConfig)
 <style scoped>
 .page {
   width: 100%;
-  max-width: 720px;
 }
 
 .page-header {
@@ -177,6 +171,29 @@ onMounted(loadConfig)
 
   .page-title {
     font-size: 18px;
+  }
+
+  .form-actions :deep(.el-button) {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .panel-card {
+    padding: 16px 12px;
+    border-radius: 8px;
+  }
+
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 16px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
   }
 }
 </style>

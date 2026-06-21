@@ -47,7 +47,7 @@
       <!-- 主体区域 -->
       <div class="doc-body">
         <div ref="contentRef" class="doc-content" v-html="displayHtml"></div>
-        <aside class="toc-sidebar">
+        <aside v-if="!isMobile" class="toc-sidebar">
           <div class="toc-title">目录</div>
           <nav class="toc-nav">
             <a
@@ -61,16 +61,43 @@
             </a>
           </nav>
         </aside>
+        <!-- 手机端目录浮动按钮 -->
+        <div v-if="isMobile && tocItems.length" class="toc-fab" @click="tocDrawerVisible = true">
+          <ElIcon :size="20"><List /></ElIcon>
+        </div>
       </div>
+
+      <!-- 手机端目录抽屉 -->
+      <ElDrawer
+        v-model="tocDrawerVisible"
+        direction="rtl"
+        size="260px"
+        :with-header="true"
+        title="目录"
+      >
+        <nav class="toc-drawer-nav">
+          <a
+            v-for="item in tocItems"
+            :key="item.id"
+            :class="['toc-item', 'toc-' + item.level]"
+            :href="'#' + item.id"
+            @click.prevent="onTocDrawerSelect(item.id)"
+          >
+            {{ item.text }}
+          </a>
+        </nav>
+      </ElDrawer>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
-import { ElInput, ElButton, ElIcon } from 'element-plus'
-import { Search, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
+import { ElInput, ElButton, ElIcon, ElDrawer } from 'element-plus'
+import { Search, ArrowUp, ArrowDown, List } from '@element-plus/icons-vue'
 import { config } from '@/config.js'
+import { apiPost } from '@/api.js'
+import { useMobile } from '@/composables/useMobile.js'
 
 const docHtml = ref('')
 const loading = ref(true)
@@ -80,6 +107,15 @@ const matchCount = ref(0)
 const currentMatchIdx = ref(0)
 const contentRef = ref(null)
 const searchResults = ref([])
+
+/* ================= 移动端适配 ================= */
+const { isMobile } = useMobile()
+const tocDrawerVisible = ref(false)
+
+function onTocDrawerSelect(id) {
+  tocDrawerVisible.value = false
+  nextTick(() => scrollToHeading(id))
+}
 
 /* ================= TOC 解析 ================= */
 const tocItems = computed(() => {
@@ -170,13 +206,7 @@ function jumpToPrev() {
 /* ================= 加载文档 ================= */
 async function fetchDoc() {
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'get_dic_doc' }),
-    })
-    if (!res.ok) throw new Error('请求失败')
-    const data = await res.json()
+    const data = await apiPost({ type: 'get_dic_doc' })
     docHtml.value = data.content
   } catch (e) {
     error.value = '加载文档失败: ' + e.message
@@ -291,6 +321,7 @@ onMounted(fetchDoc)
   gap: 24px;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .doc-content {
@@ -353,6 +384,44 @@ onMounted(fetchDoc)
 .toc-h2 { padding-left: 12px; }
 .toc-h3 { padding-left: 24px; font-size: 12px; }
 
+/* 抽屉中的目录导航 */
+.toc-drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toc-drawer-nav .toc-item {
+  font-size: 14px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+/* ===== 手机端目录浮动按钮 ===== */
+.toc-fab {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  z-index: 100;
+  transition: transform 0.2s, box-shadow 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.toc-fab:active {
+  transform: scale(0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
 .doc-loading {
   text-align: center;
   color: #909399;
@@ -362,6 +431,32 @@ onMounted(fetchDoc)
 .doc-error {
   color: #f56c6c;
   padding: 20px;
+}
+
+/* ==================== 手机端适配 ==================== */
+@media (max-width: 768px) {
+  .doc-viewer {
+    padding: 8px 12px;
+  }
+
+  .search-row {
+    max-width: 100%;
+  }
+
+  .search-results {
+    max-width: 100%;
+  }
+
+  .doc-content {
+    padding-right: 0;
+  }
+
+  .doc-content :deep(h1) { font-size: 18px; }
+  .doc-content :deep(h2) { font-size: 16px; }
+  .doc-content :deep(h3) { font-size: 14px; }
+  .doc-content :deep(pre) { padding: 8px; font-size: 12px; }
+  .doc-content :deep(table) { font-size: 12px; }
+  .doc-content :deep(th), .doc-content :deep(td) { padding: 4px 8px; }
 }
 </style>
 

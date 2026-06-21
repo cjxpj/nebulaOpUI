@@ -2,12 +2,18 @@
 import { ref, onMounted } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch } from 'element-plus'
 import { config } from '@/config.js'
+import { apiPost } from '@/api.js'
+import { useMobile } from '@/composables/useMobile.js'
+
+/* ================= 移动端适配 ================= */
+const { isMobile } = useMobile()
 
 const form = ref({
   open: false,
   dic: 'private/bot/secluded',
   address: '',
   token: '',
+  debug: false,
 })
 
 const loading = ref(false)
@@ -19,20 +25,15 @@ async function loadConfig() {
   loadFailed.value = false
 
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'get_secluded' }),
-    })
+    const data = await apiPost({ type: 'get_secluded' })
 
-    if (!res.ok) throw new Error()
-
-    const data = await res.json()
     form.value.open = Boolean(data.open)
     form.value.dic = data.dic || 'private/bot/secluded'
     form.value.address = data.address || ''
     form.value.token = data.token || ''
-  } catch {
+    form.value.debug = Boolean(data.debug)
+  } catch (e) {
+    console.error('获取 Secluded 配置失败:', e)
     loadFailed.value = true
     ElMessage.error('获取 Secluded 配置失败')
   } finally {
@@ -45,16 +46,13 @@ async function saveConfig() {
 
   saving.value = true
   try {
-    await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await apiPost({
         type: 'save_secluded',
         data: form.value,
-      }),
-    })
+      })
     ElMessage.success('配置已保存')
-  } catch {
+  } catch (e) {
+    console.error('保存 Secluded 配置失败:', e)
     ElMessage.error('保存配置失败')
   } finally {
     saving.value = false
@@ -72,7 +70,7 @@ onMounted(loadConfig)
     </div>
 
     <div class="panel-card">
-      <ElForm :model="form" v-loading="loading" label-width="90px">
+      <ElForm :model="form" v-loading="loading" label-width="90px" :label-position="isMobile ? 'top' : 'right'">
         <ElFormItem label="启用">
           <ElSwitch
             v-model="form.open"
@@ -94,6 +92,15 @@ onMounted(loadConfig)
           <ElInput v-model="form.token" show-password :disabled="loadFailed" />
         </ElFormItem>
 
+        <ElFormItem label="调试打印">
+          <ElSwitch
+            v-model="form.debug"
+            :disabled="loadFailed"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+        </ElFormItem>
+
         <ElFormItem>
           <div class="form-actions">
             <ElButton type="primary" :loading="saving" :disabled="loadFailed" @click="saveConfig">
@@ -109,7 +116,6 @@ onMounted(loadConfig)
 <style scoped>
 .page {
   width: 100%;
-  max-width: 720px;
 }
 
 .page-header {
@@ -156,6 +162,29 @@ onMounted(loadConfig)
 
   .page-title {
     font-size: 18px;
+  }
+
+  .form-actions :deep(.el-button) {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .panel-card {
+    padding: 16px 12px;
+    border-radius: 8px;
+  }
+
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 16px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
   }
 }
 </style>

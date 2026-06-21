@@ -2,6 +2,11 @@
 import { ref } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElDialog } from 'element-plus'
 import { config } from '@/config.js'
+import { apiPost } from '@/api.js'
+import { useMobile } from '@/composables/useMobile.js'
+
+/* ================= 移动端适配 ================= */
+const { isMobile } = useMobile()
 
 /* ================= 数据 ================= */
 const form = ref({
@@ -21,27 +26,17 @@ async function encryptText() {
 
   encrypting.value = true
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const data = await apiPost({
         type: 'encrypt_dic',
         data: {
           text: form.value.text,
         },
-      }),
-    })
+      })
 
-    if (!res.ok) {
-      throw new Error('request failed')
-    }
-
-    const data = await res.json()
     encryptedText.value = data.text || ''
     dialogVisible.value = true
-  } catch {
+  } catch (e) {
+    console.error('加密失败:', e)
     ElMessage.error('加密失败')
   } finally {
     encrypting.value = false
@@ -53,7 +48,8 @@ async function copyText() {
   try {
     await navigator.clipboard.writeText(encryptedText.value)
     ElMessage.success('已复制到剪贴板')
-  } catch {
+  } catch (e) {
+    console.error('复制失败:', e)
     ElMessage.error('复制失败')
   }
 }
@@ -67,7 +63,7 @@ async function copyText() {
     </div>
 
     <div class="panel-card">
-      <ElForm :model="form">
+      <ElForm :model="form" :label-position="isMobile ? 'top' : 'right'">
         <ElFormItem label="原始文本">
           <ElInput v-model="form.text" type="textarea" :rows="6" placeholder="请输入需要加密的文本" />
         </ElFormItem>
@@ -94,7 +90,6 @@ async function copyText() {
 <style scoped>
 .page {
   width: 100%;
-  max-width: 720px;
 }
 
 .page-header {
@@ -154,6 +149,29 @@ async function copyText() {
 
   .page-title {
     font-size: 18px;
+  }
+
+  .form-actions :deep(.el-button) {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .panel-card {
+    padding: 16px 12px;
+    border-radius: 8px;
+  }
+
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 16px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
   }
 }
 </style>

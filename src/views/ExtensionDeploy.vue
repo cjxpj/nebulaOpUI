@@ -59,17 +59,58 @@
             >
               查看详情
             </ElButton>
-          </template>
-          <template v-else>
             <ElButton
-              type="primary"
+              type="danger"
               size="small"
-              :loading="installing && selectedComponent?.value === component.value"
-              @click="installComponent(component)"
+              plain
+              @click="uninstallComponent(component)"
             >
-              安装
+              卸载
             </ElButton>
           </template>
+          <template v-else>
+            <template v-if="activeTask && selectedComponent?.value === component.value">
+              <ElButton
+                type="danger"
+                size="small"
+                plain
+                @click="cancelInstall"
+              >
+                取消
+              </ElButton>
+            </template>
+            <template v-else>
+              <ElButton
+                type="primary"
+                size="small"
+                @click="installComponent(component)"
+              >
+                安装
+              </ElButton>
+            </template>
+          </template>
+        </div>
+
+        <!-- 进度条（安装中的组件） -->
+        <div
+          v-if="activeTask && selectedComponent?.value === component.value"
+          class="card-progress"
+        >
+          <div class="progress-header">
+            <span class="progress-label">
+              <template v-if="installProgress.reconnecting">重连中...</template>
+              <template v-else>{{ installProgress.status === 'running' ? '安装中...' : installProgress.status === 'completed' ? '安装完成' : '安装失败' }}</template>
+            </span>
+            <span class="progress-percent">{{ Math.round(installProgress.progress || 0) }}%</span>
+          </div>
+          <ElProgress
+            :percentage="Math.round(installProgress.progress || 0)"
+            :status="installProgress.status === 'completed' ? 'success' : installProgress.status === 'failed' ? 'exception' : ''"
+            :stroke-width="8"
+          />
+          <div v-if="installProgress.output && installProgress.output.length" class="progress-output">
+            <span class="output-current">{{ installProgress.output[installProgress.output.length - 1] }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -99,18 +140,16 @@
     </ElDialog>
 
     <!-- 安装状态 -->
-    <div v-if="taskId || showStatusDetails" class="status-section">
+    <div v-if="showStatusDetails" class="status-section">
       <ElCard shadow="never" class="status-card">
         <template #header>
           <div class="status-header">
             <span>安装状态</span>
-            <ElButton type="text" size="small" @click="clearStatus">清空</ElButton>
           </div>
         </template>
 
         <div class="status-content">
           <ElDescriptions :column="1" border size="small">
-            <ElDescriptionsItem label="任务 ID">{{ taskId }}</ElDescriptionsItem>
             <ElDescriptionsItem label="组件">{{
               selectedComponent?.label || '未知'
             }}</ElDescriptionsItem>
@@ -153,8 +192,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import {
+  ElProgress,
   ElForm,
   ElFormItem,
   ElInput,
@@ -164,10 +204,12 @@ import {
   ElDescriptionsItem,
   ElScrollbar,
   ElMessage,
+  ElMessageBox,
   ElDialog,
   ElIcon,
 } from 'element-plus'
 import { config } from '@/config.js'
+import { apiPost } from '@/api.js'
 import { Document, Monitor, Message, VideoCamera, Mic } from '@element-plus/icons-vue'
 
 /* ================= 组件数据 ================= */
@@ -206,16 +248,21 @@ const components = [
 
 /* ================= 安装路径映射 ================= */
 const installPathMap = {
-  php: 'NebulaData/private/php',
-  python: 'NebulaData/private/python',
-  napcat_bot: 'NebulaData/private/NapCat.Shell',
-  ffmpeg: 'NebulaData/private/ffmpeg',
-  silk_v3: 'NebulaData/private/ffmpeg/silk_v3',
+  php: 'NebulaData/private/extensions/php',
+  python: 'NebulaData/private/extensions/python',
+  napcat_bot: 'NebulaData/private/extensions/NapCat.Shell',
+  ffmpeg: 'NebulaData/private/extensions/ffmpeg',
+  silk_v3: 'NebulaData/private/extensions/silk_v3',
 }
 
 const selectedComponent = ref(null)
-const installing = ref(false)
-const taskId = ref('')
+const activeTask = ref(null)     // 当前安装任务的 task_id
+const pollingTimer = ref(null)   // 轮询定时器（setTimeout id）
+const consecutiveErrors = ref(0) // 连续错误次数
+const reinstallAttempts = ref(0) // not_found 后重新安装次数
+const maxConsecutiveErrors = 10  // 超过此值停止轮询
+const maxReinstallAttempts = 3   // 最多重新安装次数
+let pollingActive = false        // 防止并发轮询
 const showNapCatDialog = ref(false)
 const showStatusDetails = ref(false)
 
@@ -256,28 +303,30 @@ const statusTypeMap = {
 
 /* ================= 选择组件 ================= */
 function selectComponent(component) {
+  // 安装中不允许切换组件，锁定进度条所在卡片
+  if (activeTask.value) return
   selectedComponent.value = component
+  showStatusDetails.value = false
 }
+
+/* ================= 安装进度 ================= */
+const installProgress = reactive({
+  status: '',       // running / completed / failed / reconnecting
+  component: '',
+  output: [],
+  error: '',
+  progress: 0,
+  reconnecting: false, // 断线重连中
+})
 
 /* ================= 一次性获取全部安装状态 ================= */
 async function fetchAllStatuses() {
   loadingStatus.value = true
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const data = await apiPost({
         type: 'get_install_status',
-      }),
-    })
+      })
 
-    if (!res.ok) {
-      throw new Error('请求失败')
-    }
-
-    const data = await res.json()
     Object.assign(installStatus, data)
   } catch (error) {
     console.error('获取安装状态失败:', error)
@@ -287,12 +336,21 @@ async function fetchAllStatuses() {
   }
 }
 
-onMounted(fetchAllStatuses)
+onMounted(() => {
+  fetchAllStatuses()
+  resumePendingTask()
+})
+onBeforeUnmount(() => {
+  stopPolling()
+  activeTask.value = null
+  pollingActive = false
+})
 
 /* ================= 查看安装详情 ================= */
 function showInstallDetails(component) {
+  // 安装中不允许切换，避免进度条跳走
+  if (activeTask.value) return
   selectedComponent.value = component
-  taskId.value = 'installed_' + component.value
   statusData.status = 'completed'
   statusData.component = component.value
   statusData.output = ['该组件已安装']
@@ -305,6 +363,11 @@ function showInstallDetails(component) {
 
 /* ================= 安装组件 ================= */
 function installComponent(component) {
+  // 已有安装任务在进行中，不允许切换
+  if (activeTask.value) {
+    ElMessage.warning('已有安装任务在进行中，请等待完成或取消')
+    return
+  }
   selectedComponent.value = component
 
   // 如果是 NapCat，显示参数弹窗
@@ -328,119 +391,281 @@ async function confirmNapCatInstall() {
   doInstall(selectedComponent.value, { qq: napCatForm.qq })
 }
 
+/* ================= 持久化任务状态 ================= */
+const PENDING_TASK_KEY = '_nebula_pending_install'
+
+function savePendingTask(taskId, componentValue) {
+  localStorage.setItem(PENDING_TASK_KEY, JSON.stringify({ task_id: taskId, component: componentValue, ts: Date.now() }))
+}
+
+function clearPendingTask() {
+  localStorage.removeItem(PENDING_TASK_KEY)
+}
+
+function resumePendingTask() {
+  try {
+    const raw = localStorage.getItem(PENDING_TASK_KEY)
+    if (!raw) return
+    const pending = JSON.parse(raw)
+    // 超过 30 分钟视为过期
+    if (Date.now() - pending.ts > 30 * 60 * 1000) { clearPendingTask(); return }
+    if (!pending.task_id || !pending.component) { clearPendingTask(); return }
+
+    const comp = components.find(c => c.value === pending.component)
+    if (!comp) { clearPendingTask(); return }
+
+    selectedComponent.value = comp
+    activeTask.value = pending.task_id
+    installProgress.status = 'running'
+    installProgress.progress = 0
+    installProgress.output = []
+    installProgress.error = ''
+    startPolling(pending.task_id)
+  } catch (e) {
+    console.error('恢复安装任务失败:', e)
+    clearPendingTask()
+  }
+}
+
 /* ================= 执行安装 ================= */
 async function doInstall(component, params) {
-  installing.value = true
+  // 防止并发安装
+  if (activeTask.value) {
+    ElMessage.warning('已有安装任务在进行中，请等待完成或取消')
+    return
+  }
+  if (!component) {
+    ElMessage.error('未选择组件')
+    return
+  }
+
+  // 映射组件到后端接口类型
+  const typeMap = {
+    php: 'install_php',
+    python: 'install_python',
+    napcat_bot: 'install_napcat_bot',
+    ffmpeg: 'install_ffmpeg',
+    silk_v3: 'install_silk_v3',
+  }
+  const backendType = typeMap[component.value]
+  if (!backendType) {
+    ElMessage.error('未知组件类型: ' + component.value)
+    return
+  }
+
   try {
-    // 映射组件到后端接口类型
-    const typeMap = {
-      php: 'install_php',
-      python: 'install_python',
-      napcat_bot: 'install_napcat_bot',
-      ffmpeg: 'install_ffmpeg',
-      silk_v3: 'install_silk_v3',
-    }
-    const backendType = typeMap[component.value]
-    if (!backendType) {
-      throw new Error('未知组件类型: ' + component.value)
-    }
-
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const data = await apiPost({
+      type: backendType,
+      data: {
+        component: component.value,
+        params: params,
       },
-      body: JSON.stringify({
-        type: backendType,
-        data: {
-          component: component.value,
-          params: params,
-        },
-      }),
-    })
+    }, { noRetry: true }) // 不重试安装请求，避免创建重复任务
 
-    if (!res.ok) {
-      const errorText = await res.text()
-      throw new Error(`请求失败: ${res.status} ${errorText}`)
-    }
-
-    const data = await res.json()
-    if (data.status === 'ok') {
-      // 更新安装状态
+    if (data.status === 'ok' && data.task_id) {
+      // 异步任务已创建
+      activeTask.value = data.task_id
+      savePendingTask(data.task_id, component.value)
+      installProgress.status = 'running'
+      installProgress.progress = 0
+      installProgress.output = []
+      installProgress.error = ''
+      startPolling(data.task_id)
+    } else if (data.status === 'ok') {
+      // 已安装（同步返回），直接标记
       installStatus[component.value] = true
-      // 生成一个同步任务ID用于显示状态
-      taskId.value = 'sync_' + Date.now()
-      // 直接更新状态数据
-      statusData.status = 'completed'
-      statusData.component = component.value
-      statusData.output = data.output || []
-      statusData.error = ''
-      statusData.start_time = new Date().toISOString()
-      statusData.end_time = new Date().toISOString()
-      statusData.params = params
-
-      ElMessage.success('安装完成')
-    } else {
-      throw new Error(data.error || '安装失败')
+      ElMessage.success('已安装，无需重复安装')
+    } else if (data.status === 'error') {
+      ElMessage.error(data.error || '安装失败')
     }
   } catch (error) {
     console.error('安装失败:', error)
     ElMessage.error('安装失败: ' + (error.message || '未知错误'))
-  } finally {
-    installing.value = false
   }
 }
 
-/* ================= 轮询任务状态 ================= */
-const polling = ref(false)
-
-async function pollTaskStatus() {
-  if (!taskId.value) {
-    return
-  }
-  // 同步任务不需要检查状态
-  if (taskId.value.startsWith('sync_')) {
-    return
-  }
-
-  polling.value = true
+/* ================= 卸载组件 ================= */
+async function uninstallComponent(component) {
   try {
-    const res = await fetch(config.apiBaseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'install_status',
-        data: {
-          task_id: taskId.value,
-        },
-      }),
+    await ElMessageBox.confirm(
+      `确定要卸载 ${component.label} 吗？此操作将删除安装目录，不可恢复。`,
+      '确认卸载',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch (e) {
+    console.error('卸载确认弹窗:', e)
+    return // 用户取消
+  }
+
+  // 如果该组件正在安装中，先取消
+  if (activeTask.value && selectedComponent.value?.value === component.value) {
+    stopPolling()
+    activeTask.value = null
+    Object.assign(installProgress, {
+      status: '', component: '', output: [], error: '', progress: 0, reconnecting: false,
+    })
+  }
+
+  try {
+    const data = await apiPost({
+      type: 'uninstall',
+      data: { component: component.value },
     })
 
-    if (!res.ok) {
-      const errorText = await res.text()
-      throw new Error(`请求失败: ${res.status} ${errorText}`)
-    }
-
-    const data = await res.json()
-    Object.assign(statusData, data)
-
-    // 如果状态不是完成或失败，3秒后再次检查
-    if (data.status === 'pending' || data.status === 'running') {
-      setTimeout(pollTaskStatus, 3000)
+    if (data.status === 'ok') {
+      installStatus[component.value] = false
+      // 如果卸载的是当前选中的组件，隐藏详情和清空选中
+      if (selectedComponent.value?.value === component.value) {
+        showStatusDetails.value = false
+        selectedComponent.value = null
+      }
+      ElMessage.success(component.label + ' 已卸载')
+    } else {
+      ElMessage.error(data.error || '卸载失败')
     }
   } catch (error) {
-    console.error('获取状态失败:', error)
-    ElMessage.error('获取状态失败: ' + (error.message || '未知错误'))
-  } finally {
-    polling.value = false
+    console.error('卸载失败:', error)
+    ElMessage.error('卸载失败: ' + (error.message || '未知错误'))
+  }
+}
+
+/* ================= 轮询安装进度（递归 setTimeout，防止回调重叠） ================= */
+function startPolling(taskId) {
+  stopPolling()
+  consecutiveErrors.value = 0
+  reinstallAttempts.value = 0
+  installProgress.reconnecting = false
+
+  schedulePoll(taskId)
+}
+
+function schedulePoll(taskId) {
+  // 防止任务被切换后旧回调继续执行
+  if (activeTask.value !== taskId) return
+
+  pollingTimer.value = setTimeout(async () => {
+    if (activeTask.value !== taskId) return
+
+    if (pollingActive) return // 上一轮还在跑，跳过
+    pollingActive = true
+
+    try {
+      const data = await apiPost({
+        type: 'install_progress',
+        data: { task_id: taskId },
+      }, { noRetry: true })
+
+      // 后台返回后再次确认 taskId 未变
+      if (activeTask.value !== taskId) { pollingActive = false; return }
+
+      consecutiveErrors.value = 0
+      installProgress.reconnecting = false
+
+      installProgress.status = data.status || 'running'
+      installProgress.progress = data.progress || 0
+      installProgress.output = data.output || []
+      installProgress.error = data.error || ''
+
+      if (data.status === 'completed') {
+        stopPolling()
+        clearPendingTask()
+        if (selectedComponent.value) {
+          installStatus[selectedComponent.value.value] = true
+        }
+        activeTask.value = null
+        ElMessage.success('安装完成')
+      } else if (data.status === 'cancelled') {
+        stopPolling()
+        clearPendingTask()
+        activeTask.value = null
+        ElMessage.info('安装已取消')
+      } else if (data.status === 'failed') {
+        stopPolling()
+        clearPendingTask()
+        activeTask.value = null
+        ElMessage.error('安装失败: ' + (data.error || '未知错误'))
+      } else if (data.status === 'not_found') {
+        // 后端重启导致任务丢失，尝试重新发起安装（最多 maxReinstallAttempts 次）
+        stopPolling()
+        activeTask.value = null
+        if (reinstallAttempts.value < maxReinstallAttempts && selectedComponent.value) {
+          reinstallAttempts.value++
+          clearPendingTask()
+          ElMessage.warning(`后端已重启，正在重新发起安装 (${reinstallAttempts.value}/${maxReinstallAttempts})...`)
+          installComponent(selectedComponent.value)
+        } else if (reinstallAttempts.value >= maxReinstallAttempts) {
+          clearPendingTask()
+          ElMessage.error('多次重装失败，请检查后端是否正常')
+          installProgress.status = 'failed'
+          installProgress.error = '后端反复重启，安装失败'
+        }
+      } else {
+        // running — 继续轮询
+        pollingActive = false
+        schedulePoll(taskId)
+      }
+    } catch (error) {
+      if (activeTask.value !== taskId) { pollingActive = false; return }
+
+      consecutiveErrors.value++
+      console.error(`获取进度失败 (${consecutiveErrors.value}/${maxConsecutiveErrors}):`, error.message)
+
+      if (consecutiveErrors.value >= maxConsecutiveErrors) {
+        stopPolling()
+        activeTask.value = null
+        clearPendingTask()
+        installProgress.status = 'failed'
+        installProgress.error = '连接失败次数过多，请检查后端是否运行'
+        ElMessage.error('连接失败，已停止轮询')
+      } else {
+        installProgress.reconnecting = true
+        installProgress.status = 'running'
+        pollingActive = false
+        schedulePoll(taskId) // 继续递归轮询
+      }
+    }
+    pollingActive = false
+  }, 500)
+}
+
+function stopPolling() {
+  if (pollingTimer.value) {
+    clearTimeout(pollingTimer.value)
+    pollingTimer.value = null
+  }
+  pollingActive = false
+  consecutiveErrors.value = 0
+}
+
+function cancelInstall() {
+  const taskId = activeTask.value
+  stopPolling()
+  clearPendingTask()
+  activeTask.value = null
+  reinstallAttempts.value = 0
+  // 清除该组件的安装状态
+  if (selectedComponent.value) {
+    delete installStatus[selectedComponent.value.value]
+  }
+  Object.assign(installProgress, {
+    status: '', component: '', output: [], error: '', progress: 0, reconnecting: false,
+  })
+  // 通知后端取消
+  if (taskId) {
+    apiPost({ type: 'cancel_install', data: { task_id: taskId } }, { noRetry: true })
+      .catch(() => {
+        console.warn('取消安装请求发送失败，后台任务可能仍在运行')
+        ElMessage.warning('取消请求发送失败，安装可能仍在后台进行')
+      })
+  } else {
+    ElMessage.info('安装已取消')
   }
 }
 
 /* ================= 清空状态 ================= */
 function clearStatus() {
-  taskId.value = ''
+  stopPolling()
+  activeTask.value = null
   showStatusDetails.value = false
   Object.assign(statusData, {
     status: '',
@@ -451,7 +676,16 @@ function clearStatus() {
     end_time: null,
     params: {},
   })
+  Object.assign(installProgress, {
+    status: '',
+    component: '',
+    output: [],
+    error: '',
+    progress: 0,
+    reconnecting: false,
+  })
   selectedComponent.value = null
+  consecutiveErrors.value = 0
   ElMessage.info('状态已清空')
 }
 
@@ -702,6 +936,49 @@ function formatTime(time) {
   font-weight: 500;
 }
 
+/* ==================== 卡片内进度条 ==================== */
+.card-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 16px 12px 16px;
+  background: var(--el-bg-color-overlay);
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.progress-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
+.progress-percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.progress-output {
+  margin-top: 6px;
+}
+
+.output-current {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
 /* ==================== 弹窗底部 ==================== */
 .dialog-footer {
   display: flex;
@@ -737,6 +1014,40 @@ function formatTime(time) {
     width: 44px;
     height: 44px;
     border-radius: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .extension-deploy {
+    padding: 12px;
+  }
+
+  .page-title {
+    font-size: 16px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
+  }
+
+  .component-card {
+    padding: 12px 14px;
+    gap: 10px;
+    border-radius: 10px;
+  }
+
+  .card-icon-box {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .card-title {
+    font-size: 14px;
+  }
+
+  .card-desc {
+    font-size: 12px;
   }
 }
 
