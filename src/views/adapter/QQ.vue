@@ -1,7 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch, ElPopconfirm, ElTag, ElCollapse, ElCollapseItem } from 'element-plus'
-import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
@@ -30,10 +29,12 @@ async function loadConfig() {
       secret: item.config.secret || '',
       at_compat: Boolean(item.config.at_compat),
       debug: Boolean(item.config.debug),
+      ws: Boolean(item.config.ws),
+      ws_intents: Number(item.config.ws_intents) || 0,
       remark: item.config.remark || '',
     }))
     if (instances.value.length === 0) {
-      instances.value.push({ section: 'QQ', open: false, dic: 'private/bot/qq', path: 'qq-bot', appid: '', secret: '', at_compat: false, debug: false, remark: 'bot1' })
+      instances.value.push({ section: 'QQ', open: false, dic: 'private/bot/qq', path: 'qq-bot', appid: '', secret: '', at_compat: false, debug: false, ws: true, ws_intents: 0, remark: 'bot1' })
     }
   } catch (e) { console.error('获取 QQ 配置失败:', e); loadFailed.value = true; ElMessage.error('获取 QQ 配置失败') }
   finally { loading.value = false }
@@ -44,11 +45,14 @@ async function saveInstance(instance, silent) {
   if (loadFailed.value) return
   if (instance.open && !instance.path) return ElMessage.error('访问路径不能为空')
   if (instance.open && !instance.appid) return ElMessage.error('APPID 不能为空')
+  const dup = instances.value.find(i => i !== instance && i.remark === instance.remark)
+  if (dup) return ElMessage.error(`备注名 "${instance.remark}" 已被使用`)
   savingMap.value[instance.section] = true
   try {
     await apiPost({ type: 'save_qq', data: { section: instance.section, config: {
         open: instance.open, dic: instance.dic, path: instance.path, appid: instance.appid,
-        secret: instance.secret, at_compat: instance.at_compat, debug: instance.debug, remark: instance.remark,
+        secret: instance.secret, at_compat: instance.at_compat, debug: instance.debug, ws: instance.ws,
+        ws_intents: instance.ws_intents, remark: instance.remark,
       }}})
     if (!silent) ElMessage.success(`${getTitle(instance)} 已保存`)
   } catch (e) { console.error('保存 QQ 配置失败:', e); if (!silent) ElMessage.error('保存失败') }
@@ -56,6 +60,39 @@ async function saveInstance(instance, silent) {
 }
 
 function onOpenChange(instance) { saveInstance(instance, true) }
+
+/* ================= 调试打印实时切换（不重连） ================= */
+async function toggleDebug(instance) {
+  if (loadFailed.value) return
+  try {
+    await apiPost({ type: 'toggle_qq_debug', data: { section: instance.section, debug: instance.debug } })
+  } catch (e) { console.error('切换调试打印失败:', e); instance.debug = !instance.debug; ElMessage.error('切换失败') }
+}
+
+/* ================= 监听码 blur 自动保存 ================= */
+async function onWsIntentsBlur(instance) {
+  await saveInstance(instance, true)
+}
+
+/* ================= WS 单独切换 ================= */
+const wsSavingMap = ref({})
+
+async function toggleWs(instance) {
+  if (loadFailed.value) return
+  wsSavingMap.value[instance.section] = true
+  try {
+    await apiPost({ type: 'save_qq', data: { section: instance.section, config: {
+        open: instance.open, dic: instance.dic, path: instance.path, appid: instance.appid,
+        secret: instance.secret, at_compat: instance.at_compat, debug: instance.debug,
+        ws: instance.ws, ws_intents: instance.ws_intents, remark: instance.remark,
+      }}})
+    ElMessage.success(`${getTitle(instance)} WebSocket 已${instance.ws ? '开启' : '关闭'}`)
+  } catch (e) {
+    console.error('切换 WebSocket 失败:', e)
+    instance.ws = !instance.ws
+    ElMessage.error('切换 WebSocket 失败')
+  } finally { wsSavingMap.value[instance.section] = false }
+}
 
 /* ================= 增删实例 ================= */
 async function addInstance() {
@@ -67,6 +104,8 @@ async function addInstance() {
       dic: data.config.dic || 'private/bot/qq', path: data.config.path || 'qq-bot',
       appid: data.config.appid || '', secret: data.config.secret || '',
       at_compat: Boolean(data.config.at_compat), debug: Boolean(data.config.debug),
+      ws: Boolean(data.config.ws),
+      ws_intents: Number(data.config.ws_intents) || 0,
       remark: data.config.remark || `bot${instances.value.length + 1}`,
     }
     instances.value.push(inst)
@@ -175,23 +214,35 @@ onMounted(loadConfig)
                 </ElFormItem>
               </el-col>
               <el-col :xs="24" :sm="12">
-                <ElFormItem label="全量艾特兼容">
-                  <ElSwitch v-model="inst.at_compat" size="small" />
+                <ElFormItem label="监听码">
+                  <ElInput v-model.number="inst.ws_intents" placeholder="监听码" @blur="onWsIntentsBlur(inst)" />
+                </ElFormItem>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <ElFormItem>
+                  <div class="form-actions">
+                    <ElButton type="primary" :loading="savingMap[inst.section]" @click="saveInstance(inst)">
+                      保存配置
+                    </ElButton>
+                  </div>
                 </ElFormItem>
               </el-col>
               <el-col :xs="24" :sm="12">
                 <ElFormItem label="调试打印">
-                  <ElSwitch v-model="inst.debug" size="small" />
+                  <ElSwitch v-model="inst.debug" size="small" :disabled="loadFailed" @change="toggleDebug(inst)" />
+                </ElFormItem>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <ElFormItem label="全量艾特兼容">
+                  <ElSwitch v-model="inst.at_compat" size="small" @change="saveInstance(inst, true)" />
+                </ElFormItem>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <ElFormItem label="WebSocket">
+                  <ElSwitch v-model="inst.ws" size="small" :loading="wsSavingMap[inst.section]" @change="toggleWs(inst)" />
                 </ElFormItem>
               </el-col>
             </el-row>
-            <ElFormItem>
-              <div class="form-actions">
-                <ElButton type="primary" :loading="savingMap[inst.section]" @click="saveInstance(inst)">
-                  保存配置
-                </ElButton>
-              </div>
-            </ElFormItem>
           </ElForm>
         </div>
       </ElCollapseItem>
@@ -290,7 +341,7 @@ onMounted(loadConfig)
 .collapse-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   padding-right: 8px;
 }
@@ -301,7 +352,7 @@ onMounted(loadConfig)
 }
 
 .remark-input {
-  width: 180px;
+  width: 110px;
   flex-shrink: 0;
 }
 
@@ -380,7 +431,7 @@ onMounted(loadConfig)
   }
 
   .remark-input {
-    width: 90px;
+    width: 80px;
   }
 
   .form-actions :deep(.el-button) {
