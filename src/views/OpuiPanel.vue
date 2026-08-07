@@ -137,7 +137,9 @@ async function saveBg() {
       saveData = bgLocalBase64.value
     }
     await apiPost({ type: 'save_bg', data: { type: saveType, data: saveData } })
-    ElMessage.success('背景图已保存，刷新页面生效')
+    // 通知主界面实时刷新背景图，无需刷新页面
+    window.dispatchEvent(new CustomEvent('opui-bg-updated'))
+    ElMessage.success('背景图已保存，立即生效')
   } catch (e) {
     console.error('保存背景图失败:', e)
     ElMessage.error('保存背景图失败')
@@ -153,7 +155,9 @@ async function resetBg() {
     bgType.value = 'url'
     bgUrl.value = ''
     bgLocalBase64.value = ''
-    ElMessage.success('已恢复默认背景图，刷新页面生效')
+    // 通知主界面实时恢复默认背景图
+    window.dispatchEvent(new CustomEvent('opui-bg-updated'))
+    ElMessage.success('已恢复默认背景图，立即生效')
   } catch (e) {
     console.error('恢复默认背景图失败:', e)
     ElMessage.error('恢复默认背景图失败')

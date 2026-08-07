@@ -80,6 +80,11 @@
               <template #title> 面板配置 </template>
             </ElMenuItem>
 
+            <ElMenuItem index="dic-debug">
+              <ElIcon><Cpu /></ElIcon>
+              <template #title> 词库调试 </template>
+            </ElMenuItem>
+
             <ElMenuItem index="encrypted-dic">
               <ElIcon><Document /></ElIcon>
               <template #title> 加密词库 </template>
@@ -155,6 +160,11 @@
               <template #title> 面板配置 </template>
             </ElMenuItem>
 
+            <ElMenuItem index="dic-debug">
+              <ElIcon><Cpu /></ElIcon>
+              <template #title> 词库调试 </template>
+            </ElMenuItem>
+
             <ElMenuItem index="encrypted-dic">
               <ElIcon><Document /></ElIcon>
               <template #title> 加密词库 </template>
@@ -211,6 +221,7 @@ import {
   Menu,
   Close,
   SwitchButton,
+  Cpu,
 } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
@@ -223,6 +234,8 @@ const bgBlobUrl = ref(null) // 用于 revoke blob URL
 
 async function loadBg() {
   let loaded = false
+  // 重新加载前释放旧 blob，避免内存泄漏
+  revokeBgBlob()
   try {
     const data = await apiPost({ type: 'get_bg' })
     if (data && data.type && data.data) {
@@ -281,9 +294,16 @@ function onMobileMenuSelect(page) {
   switchPage(page)
 }
 
-onMounted(loadBg)
+onMounted(() => {
+  loadBg()
+  // 背景图保存后实时刷新，无需刷新页面
+  window.addEventListener('opui-bg-updated', loadBg)
+})
 
-onUnmounted(revokeBgBlob)
+onUnmounted(() => {
+  window.removeEventListener('opui-bg-updated', loadBg)
+  revokeBgBlob()
+})
 
 /* ================= 页面组件 ================= */
 import LoadPage from '@/views/Load.vue'
@@ -310,6 +330,8 @@ import ExtensionDeploy from '@/views/ExtensionDeploy.vue'
 import DocViewer from '@/views/DocViewer.vue'
 // OPUI面板
 import OpuiPanel from '@/views/OpuiPanel.vue'
+// 词库调试
+import DicDebug from '@/views/DicDebug.vue'
 
 const viewMap = {
   'load-page': LoadPage,
@@ -328,6 +350,7 @@ const viewMap = {
 
   'encrypted-dic': EncryptedLexicon,
   'opui-panel': OpuiPanel,
+  'dic-debug': DicDebug,
   'extension-deploy': ExtensionDeploy,
   'doc-view': DocViewer,
 }

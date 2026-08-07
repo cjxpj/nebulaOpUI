@@ -24,6 +24,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // 绕过 monaco-editor 0.56+ exports 字段对 esm/vs 子路径的限制
+      'monaco-editor/esm/vs': fileURLToPath(
+        new URL('./node_modules/monaco-editor/esm/vs', import.meta.url)
+      ),
     },
   },
 })
