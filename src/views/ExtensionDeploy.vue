@@ -1,13 +1,22 @@
 <template>
   <div class="extension-deploy">
+    <!-- 非 Windows 平台：扩展部署不支持 -->
+    <div v-if="isUnsupported" class="unsupported-panel">
+      <div class="unsupported-icon">
+        <ElIcon :size="40"><WarningFilled /></ElIcon>
+      </div>
+      <h3 class="unsupported-title">当前平台不支持扩展部署</h3>
+      <p class="unsupported-desc">扩展部署功能仅适用于 Windows 端，当前平台无法安装和管理这些组件。</p>
+    </div>
+
     <!-- 头部标题 -->
-    <div class="page-header">
+    <div v-if="!isUnsupported" class="page-header">
       <h2 class="page-title">扩展部署</h2>
       <p class="page-subtitle">管理和安装服务器组件扩展</p>
     </div>
 
     <!-- 组件卡片网格 -->
-    <div class="components-grid">
+    <div v-if="!isUnsupported" class="components-grid">
       <div
         v-for="component in components"
         :key="component.value"
@@ -140,7 +149,7 @@
     </ElDialog>
 
     <!-- 安装状态 -->
-    <div v-if="showStatusDetails" class="status-section">
+    <div v-if="showStatusDetails && !isUnsupported" class="status-section">
       <ElCard shadow="never" class="status-card">
         <template #header>
           <div class="status-header">
@@ -192,10 +201,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
-import { Document, Monitor, Message, VideoCamera, Mic } from '@element-plus/icons-vue'
+import { Document, Monitor, Message, VideoCamera, Mic, WarningFilled } from '@element-plus/icons-vue'
 
 /* ================= 组件数据 ================= */
 const components = [
@@ -250,6 +259,26 @@ const maxReinstallAttempts = 3   // 最多重新安装次数
 let pollingActive = false        // 防止并发轮询
 const showNapCatDialog = ref(false)
 const showStatusDetails = ref(false)
+
+/* ================= 平台检测（扩展部署仅支持 Windows 端） ================= */
+const platform = ref('') // 后端 host.os：windows / linux / android ...
+const platformChecked = ref(false)
+const isUnsupported = computed(
+  () => platformChecked.value && platform.value !== '' && platform.value !== 'windows',
+)
+
+async function checkPlatform() {
+  try {
+    const data = await apiPost({ type: 'get_sys_status' })
+    platform.value = data?.host?.os || ''
+  } catch (error) {
+    // 获取失败时按 Windows 展示，避免误判为不支持
+    console.warn('获取平台信息失败:', error)
+    platform.value = ''
+  } finally {
+    platformChecked.value = true
+  }
+}
 
 /* ================= 安装状态 ================= */
 const installStatus = reactive({})
@@ -322,8 +351,11 @@ async function fetchAllStatuses() {
 }
 
 onMounted(() => {
-  fetchAllStatuses()
-  resumePendingTask()
+  checkPlatform().then(() => {
+    if (isUnsupported.value) return
+    fetchAllStatuses()
+    resumePendingTask()
+  })
 })
 onBeforeUnmount(() => {
   stopPolling()
@@ -966,6 +998,38 @@ function formatTime(time) {
   justify-content: flex-end;
   align-items: center;
   gap: 12px;
+}
+
+/* ==================== 不支持提示 ==================== */
+.unsupported-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 24px;
+  background: var(--el-bg-color);
+  border: 1px dashed var(--el-border-color);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.unsupported-icon {
+  color: var(--el-color-warning);
+  margin-bottom: 16px;
+}
+
+.unsupported-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.unsupported-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 
 /* ==================== 响应式 ==================== */

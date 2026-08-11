@@ -22,6 +22,14 @@
             </ElDropdownMenu>
           </template>
         </ElDropdown>
+        <ElButton
+          :icon="RefreshRight"
+          :loading="checkingUpdate"
+          :size="isMobile ? 'small' : 'default'"
+          @click="checkUpdate"
+        >
+          检测更新
+        </ElButton>
       </div>
     </div>
 
@@ -140,12 +148,55 @@
         </ElTable>
       </div>
     </div>
+
+    <!-- 检测更新 -->
+    <ElDialog
+      v-model="updateDialogVisible"
+      title="检测更新"
+      :width="isMobile ? '92%' : 460"
+    >
+      <template v-if="updateInfo">
+        <div v-if="updateInfo.status === 'error'" class="update-error">
+          <ElAlert :title="updateInfo.error || '更新检测失败'" type="error" show-icon :closable="false" />
+          <p v-if="updateInfo.current" style="margin-top: 12px; color: #909399;">你当前版本：{{ updateInfo.current }}</p>
+        </div>
+        <template v-else>
+        <ElDescriptions :column="1" border size="small">
+          <ElDescriptionsItem label="当前版本">{{ updateInfo.current || '-' }}</ElDescriptionsItem>
+          <ElDescriptionsItem label="最新版本">
+            {{ updateInfo.latest || '-' }}
+            <ElTag v-if="updateInfo.update" type="danger" size="small" effect="dark" class="update-tag">有新版本</ElTag>
+            <ElTag v-else type="success" size="small" effect="dark" class="update-tag">已是最新版本</ElTag>
+          </ElDescriptionsItem>
+        </ElDescriptions>
+        <div v-if="updateInfo.update && updateInfo.notes" class="update-notes">
+          <h4>更新说明</h4>
+          <ElScrollbar height="200px">
+            <div class="update-notes-content">{{ updateInfo.notes }}</div>
+          </ElScrollbar>
+        </div>
+        </template>
+      </template>
+      <template #footer>
+        <ElButton @click="updateDialogVisible = false">关闭</ElButton>
+        <ElButton
+          v-if="updateInfo?.update && (updateInfo.down_url || updateInfo.url)"
+          type="primary"
+          tag="a"
+          :href="updateInfo.down_url || updateInfo.url"
+          target="_blank"
+          @click="updateDialogVisible = false"
+        >
+          下载更新客户端
+        </ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Refresh, ArrowDown } from '@element-plus/icons-vue'
+import { Refresh, ArrowDown, RefreshRight } from '@element-plus/icons-vue'
 import { useTransition } from '@vueuse/core'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
@@ -278,6 +329,29 @@ onMounted(() => {
 onUnmounted(() => {
   stopAuto()
 })
+
+/* ================= 检测更新 ================= */
+const checkingUpdate = ref(false)
+const updateDialogVisible = ref(false)
+const updateInfo = ref(null)
+
+async function checkUpdate() {
+  if (checkingUpdate.value) return
+  checkingUpdate.value = true
+  try {
+    const data = await apiPost({ type: 'check_update' })
+    updateInfo.value = data
+    updateDialogVisible.value = true
+    if (data.status === 'error') {
+      ElMessage.warning(data.error || '检测更新失败')
+    }
+  } catch (e) {
+    console.error('检测更新失败:', e)
+    ElMessage.error('检测更新失败: ' + (e.message || '未知错误'))
+  } finally {
+    checkingUpdate.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -552,5 +626,32 @@ onUnmounted(() => {
   .panel-card {
     padding: 12px 10px;
   }
+}
+
+/* ==================== 检测更新 ==================== */
+.update-tag {
+  margin-left: 8px;
+}
+
+.update-notes {
+  margin-top: 16px;
+}
+
+.update-notes h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+
+.update-notes-content {
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
+  color: var(--el-text-color-primary);
 }
 </style>
