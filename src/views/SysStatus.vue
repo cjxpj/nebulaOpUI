@@ -145,7 +145,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElButton, ElMessage, ElIcon } from 'element-plus'
 import { Refresh, ArrowDown } from '@element-plus/icons-vue'
 import { useTransition } from '@vueuse/core'
 import { apiPost } from '@/api.js'

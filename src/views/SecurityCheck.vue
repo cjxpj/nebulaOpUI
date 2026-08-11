@@ -168,19 +168,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
-  ElCard,
-  ElButton,
-  ElIcon,
-  ElTag,
-  ElTimeline,
-  ElTimelineItem,
-  ElEmpty,
-  ElInput,
-  ElSwitch,
-  ElPopconfirm,
-  ElMessage,
-} from 'element-plus'
-import {
   Refresh,
   Clock,
   Warning,

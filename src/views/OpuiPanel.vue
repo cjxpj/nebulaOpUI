@@ -1,6 +1,5 @@
 <script setup>
 import { ref, computed, onMounted, inject, watch } from 'vue'
-import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch, ElImage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'

@@ -8,8 +8,7 @@ import { ref, onMounted, onUnmounted, provide } from 'vue'
 import HomeView from '@/views/HomeView.vue'
 import Login from '@/views/Login.vue'
 import { apiPost, onPush, disconnect, onUnauthorized } from '@/api.js'
-import { clearDocCache } from '@/views/DocViewer.vue'
-import { ElNotification } from 'element-plus'
+import { clearDocCache } from '@/docCache.js'
 
 /* ================= 主题 ================= */
 const isDarkMode = ref(true)

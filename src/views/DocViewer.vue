@@ -91,21 +91,12 @@
   </div>
 </template>
 
-<script>
-// 模块级缓存：登录后首次加载文档，后续访问直接使用缓存，重新登录后清空
-let cachedDocHtml = null
-
-export function clearDocCache() {
-  cachedDocHtml = null
-}
-</script>
-
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
-import { ElInput, ElButton, ElIcon, ElDrawer } from 'element-plus'
 import { Search, ArrowUp, ArrowDown, List } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
+import { getCachedDocHtml, setCachedDocHtml } from '@/docCache.js'
 
 const docHtml = ref('')
 const loading = ref(true)
@@ -213,14 +204,14 @@ function jumpToPrev() {
 
 /* ================= 加载文档 ================= */
 async function fetchDoc() {
-  if (cachedDocHtml !== null) {
-    docHtml.value = cachedDocHtml
+  if (getCachedDocHtml() !== null) {
+    docHtml.value = getCachedDocHtml()
     loading.value = false
     return
   }
   try {
     const data = await apiPost({ type: 'get_dic_doc' })
-    cachedDocHtml = data.content
+    setCachedDocHtml(data.content)
     docHtml.value = data.content
   } catch (e) {
     error.value = '加载文档失败: ' + e.message

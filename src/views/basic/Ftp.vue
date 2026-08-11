@@ -1,6 +1,5 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElForm, ElFormItem, ElInput, ElInputNumber, ElButton, ElMessage, ElMessageBox, ElSwitch } from 'element-plus'
 import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'

@@ -193,21 +193,6 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
-import {
-  ElProgress,
-  ElForm,
-  ElFormItem,
-  ElInput,
-  ElButton,
-  ElTag,
-  ElDescriptions,
-  ElDescriptionsItem,
-  ElScrollbar,
-  ElMessage,
-  ElMessageBox,
-  ElDialog,
-  ElIcon,
-} from 'element-plus'
 import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
 import { Document, Monitor, Message, VideoCamera, Mic } from '@element-plus/icons-vue'

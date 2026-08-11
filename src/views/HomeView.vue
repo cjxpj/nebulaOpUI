@@ -216,19 +216,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, shallowRef, inject, provide } from 'vue'
 import {
-  ElConfigProvider,
-  ElMenu,
-  ElMenuItem,
-  ElSubMenu,
-  ElButton,
-  ElBacktop,
-  ElPageHeader,
-  ElIcon,
-  ElDrawer,
-} from 'element-plus'
-
+  ref,
+  onMounted,
+  onUnmounted,
+  shallowRef,
+  inject,
+  provide,
+  defineAsyncComponent,
+} from 'vue'
 import {
   Setting,
   Connection,
@@ -335,36 +331,37 @@ onUnmounted(() => {
 })
 
 /* ================= 页面组件 ================= */
+// 首页默认加载页保持静态引入，其余页面按需懒加载，减小首屏体积
 import LoadPage from '@/views/Load.vue'
 // 基础配置
-import BasicServer from '@/views/basic/Server.vue'
-import BasicWS from '@/views/basic/WebSocket.vue'
-import BasicNgrok from '@/views/basic/Ngrok.vue'
-import BasicFrp from '@/views/basic/Frp.vue'
-import BasicFtp from '@/views/basic/Ftp.vue'
-import BasicSftp from '@/views/basic/Sftp.vue'
+const BasicServer = defineAsyncComponent(() => import('@/views/basic/Server.vue'))
+const BasicWS = defineAsyncComponent(() => import('@/views/basic/WebSocket.vue'))
+const BasicNgrok = defineAsyncComponent(() => import('@/views/basic/Ngrok.vue'))
+const BasicFrp = defineAsyncComponent(() => import('@/views/basic/Frp.vue'))
+const BasicFtp = defineAsyncComponent(() => import('@/views/basic/Ftp.vue'))
+const BasicSftp = defineAsyncComponent(() => import('@/views/basic/Sftp.vue'))
 // 对接配置
-import AdapterQQ from '@/views/adapter/QQ.vue'
-import AdapterNapCat from '@/views/adapter/NapCat.vue'
-import AdapterYunHu from '@/views/adapter/YunHu.vue'
-import AdapterFeiShu from '@/views/adapter/FeiShu.vue'
-import AdapterSecluded from '@/views/adapter/Secluded.vue'
+const AdapterQQ = defineAsyncComponent(() => import('@/views/adapter/QQ.vue'))
+const AdapterNapCat = defineAsyncComponent(() => import('@/views/adapter/NapCat.vue'))
+const AdapterYunHu = defineAsyncComponent(() => import('@/views/adapter/YunHu.vue'))
+const AdapterFeiShu = defineAsyncComponent(() => import('@/views/adapter/FeiShu.vue'))
+const AdapterSecluded = defineAsyncComponent(() => import('@/views/adapter/Secluded.vue'))
 
 // 词库商城
-import EncryptedLexicon from '@/views/EncryptedLexicon.vue'
+const EncryptedLexicon = defineAsyncComponent(() => import('@/views/EncryptedLexicon.vue'))
 
 // 扩展部署
-import ExtensionDeploy from '@/views/ExtensionDeploy.vue'
+const ExtensionDeploy = defineAsyncComponent(() => import('@/views/ExtensionDeploy.vue'))
 // 查看文档
-import DocViewer from '@/views/DocViewer.vue'
+const DocViewer = defineAsyncComponent(() => import('@/views/DocViewer.vue'))
 // OPUI面板
-import OpuiPanel from '@/views/OpuiPanel.vue'
-// 词库调试
-import DicDebug from '@/views/DicDebug.vue'
+const OpuiPanel = defineAsyncComponent(() => import('@/views/OpuiPanel.vue'))
+// 词库调试（含 monaco 编辑器，体积最大，进入页面时才加载）
+const DicDebug = defineAsyncComponent(() => import('@/views/DicDebug.vue'))
 // 系统状态
-import SysStatus from '@/views/SysStatus.vue'
+const SysStatus = defineAsyncComponent(() => import('@/views/SysStatus.vue'))
 // 安全中心
-import SecurityCheck from '@/views/SecurityCheck.vue'
+const SecurityCheck = defineAsyncComponent(() => import('@/views/SecurityCheck.vue'))
 
 const viewMap = {
   'load-page': LoadPage,

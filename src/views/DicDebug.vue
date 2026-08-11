@@ -1,6 +1,5 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, inject, h, nextTick } from 'vue'
-import { ElForm, ElFormItem, ElSelect, ElOption, ElInput, ElInputNumber, ElButton, ElSwitch, ElDialog, ElMessage, ElMessageBox, ElEmpty, ElTag, ElIcon } from 'element-plus'
 import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen } from '@element-plus/icons-vue'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 // 编辑器核心特性（contrib），不含内置语言与语言服务
