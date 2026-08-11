@@ -14,6 +14,7 @@
             type="password"
             class="login-input"
             placeholder="请输入密钥"
+            @input="connectionError = false"
             @keyup.enter="doLogin()"
           />
         </div>
@@ -23,7 +24,7 @@
             <span>记住登录状态</span>
           </label>
         </div>
-        <button class="login-btn" :disabled="!key || logging" @click="doLogin()">
+        <button class="login-btn" :disabled="!key || logging || connectionError" @click="doLogin()">
           {{ logging ? '验证中...' : '登录' }}
         </button>
         <p v-if="error" class="login-error">{{ error }}</p>
@@ -45,6 +46,7 @@ const logging = ref(false)
 const error = ref('')
 const autoLogin = ref(true)
 const keyInput = ref(null)
+const connectionError = ref(false)
 
 async function doLogin(k) {
   const keyToTry = k || key.value
@@ -67,6 +69,7 @@ async function doLogin(k) {
   } catch (e) {
     console.error('[OPUI Login]', e)
     error.value = '验证失败，请稍后重试'
+    connectionError.value = true
   } finally {
     logging.value = false
     autoLogin.value = false

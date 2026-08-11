@@ -62,7 +62,7 @@ async function toggleFrp() {
 
   toggling.value = true
   try {
-    const result = await apiPost({
+    await apiPost({
         type: 'save_frp',
         data: {
           open: form.value.open,
@@ -71,12 +71,6 @@ async function toggleFrp() {
           debug: form.value.debug,
         },
       })
-
-    if (result.status === 'error') {
-      ElMessage.error(result.error || '操作失败')
-      form.value.open = !form.value.open
-      return
-    }
 
     ElMessage.success(form.value.open ? 'BeerFrp 已启用' : 'BeerFrp 已关闭')
   } catch (e) {
@@ -94,7 +88,7 @@ async function saveConfig() {
 
   saving.value = true
   try {
-    const result = await apiPost({
+    await apiPost({
         type: 'save_frp',
         data: {
           open: form.value.open,
@@ -103,11 +97,6 @@ async function saveConfig() {
           debug: form.value.debug,
         },
       })
-
-    if (result.status === 'error') {
-      ElMessage.error(result.error || '保存配置失败')
-      return
-    }
 
     ElMessage.success('配置已保存')
   } catch (e) {

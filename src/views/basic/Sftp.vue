@@ -48,7 +48,7 @@ async function saveConfig(silent) {
 
   saving.value = true
   try {
-    const result = await apiPost({
+    await apiPost({
         type: 'save_sftp',
         data: {
           open: form.value.open,
@@ -58,11 +58,6 @@ async function saveConfig(silent) {
           debug: form.value.debug,
         },
       })
-
-    if (result.status === 'error') {
-      ElMessage.error(result.error || '保存配置失败')
-      return
-    }
 
     if (!silent) {
       ElMessage.success('SFTP 配置已保存')

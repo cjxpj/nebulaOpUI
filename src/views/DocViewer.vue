@@ -91,11 +91,19 @@
   </div>
 </template>
 
+<script>
+// 模块级缓存：登录后首次加载文档，后续访问直接使用缓存，重新登录后清空
+let cachedDocHtml = null
+
+export function clearDocCache() {
+  cachedDocHtml = null
+}
+</script>
+
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { ElInput, ElButton, ElIcon, ElDrawer } from 'element-plus'
 import { Search, ArrowUp, ArrowDown, List } from '@element-plus/icons-vue'
-import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
@@ -205,8 +213,14 @@ function jumpToPrev() {
 
 /* ================= 加载文档 ================= */
 async function fetchDoc() {
+  if (cachedDocHtml !== null) {
+    docHtml.value = cachedDocHtml
+    loading.value = false
+    return
+  }
   try {
     const data = await apiPost({ type: 'get_dic_doc' })
+    cachedDocHtml = data.content
     docHtml.value = data.content
   } catch (e) {
     error.value = '加载文档失败: ' + e.message
@@ -220,15 +234,12 @@ onMounted(fetchDoc)
 
 <style scoped>
 .doc-viewer {
+  height: 100%;
   padding: 16px 24px;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* ===== 搜索栏 ===== */
@@ -337,8 +348,10 @@ onMounted(fetchDoc)
 .doc-content :deep(h2) { font-size: 18px; margin: 14px 0 6px; }
 .doc-content :deep(h3) { font-size: 15px; margin: 12px 0 4px; }
 .doc-content :deep(p) { margin: 4px 0; }
+.doc-content :deep(blockquote) { margin: 4px 0; padding: 0; border: none; }
 .doc-content :deep(code) { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 .doc-content :deep(pre) { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
+.doc-content :deep(pre code) { padding: 0; background: transparent; font-size: inherit; border-radius: 0; }
 .doc-content :deep(table) { border-collapse: collapse; margin: 8px 0; }
 .doc-content :deep(th), .doc-content :deep(td) { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
 .doc-content :deep(th) { background: #f5f5f5; }
@@ -463,6 +476,7 @@ onMounted(fetchDoc)
 <style>
 .dark .doc-content code { background: #2d2d2d; color: #e0e0e0; }
 .dark .doc-content pre { background: #2d2d2d; color: #e0e0e0; }
+.dark .doc-content pre code { background: transparent; }
 .dark .doc-content th, .dark .doc-content td { border-color: #444; }
 .dark .doc-content th { background: #333; }
 .dark .doc-content h1,

@@ -69,7 +69,7 @@ async function saveConfig(silent) {
 
   saving.value = true
   try {
-    const result = await apiPost({
+    await apiPost({
         type: 'save_ftp',
         data: {
           open: form.value.open,
@@ -82,11 +82,6 @@ async function saveConfig(silent) {
           pasv_port_end: form.value.pasv_port_end,
         },
       })
-
-    if (result.status === 'error') {
-      ElMessage.error(result.error || '保存配置失败')
-      return
-    }
 
     if (!silent) {
       ElMessage.success('FTP 配置已保存')

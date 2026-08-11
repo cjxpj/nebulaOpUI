@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, inject, h, nextTick } from 'vue'
 import { ElForm, ElFormItem, ElSelect, ElOption, ElInput, ElInputNumber, ElButton, ElSwitch, ElDialog, ElMessage, ElMessageBox, ElEmpty, ElTag, ElIcon } from 'element-plus'
-import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen } from '@element-plus/icons-vue'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 // 编辑器核心特性（contrib），不含内置语言与语言服务
 import 'monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js'
@@ -434,6 +434,8 @@ const dicForm = ref({
   g: [],
   // 超时（秒），0 表示不限时
   timeout: 15,
+  // 上一步/下一步历史记录最大条数
+  historyMax: 50,
 })
 const gKeyInput = ref('')
 const gValueInput = ref('')
@@ -459,6 +461,7 @@ function configsEqual(a, b) {
     (a.path || '') === (b.path || '') &&
     (a.trigger || '') === (b.trigger || '') &&
     Number(a.timeout || 0) === Number(b.timeout || 0) &&
+    Number(a.historyMax || 0) === Number(b.historyMax || 0) &&
     !!a.saveRun === !!b.saveRun &&
     !!a.autoSave === !!b.autoSave &&
     JSON.stringify(a.g || []) === JSON.stringify(b.g || [])
@@ -479,6 +482,16 @@ function applyConfig(saved) {
   if (saved.saveRun !== undefined) saveRun.value = saved.saveRun
   if (saved.autoSave !== undefined) autoSave.value = saved.autoSave
   if (saved.timeout !== undefined) dicForm.value.timeout = saved.timeout
+  if (saved.historyMax && saved.historyMax > 0) {
+    dicForm.value.historyMax = saved.historyMax
+    // 设置生效后立即截断已超出上限的历史
+    if (history.stack.length > saved.historyMax) {
+      history.stack = history.stack.slice(-saved.historyMax)
+      history.index = history.stack.length - 1
+      if (dicForm.value.path) saveHistory(dicForm.value.path, history)
+      updateUndoState()
+    }
+  }
 }
 
 // 读取运行配置：每次从后端读取最新配置（不缓存到本地）
@@ -514,6 +527,7 @@ function buildConfig() {
     saveRun: saveRun.value,
     autoSave: autoSave.value,
     timeout: dicForm.value.timeout,
+    historyMax: dicForm.value.historyMax,
   }
 }
 
@@ -544,6 +558,8 @@ watch(
     autoSave,
     // timeout 也参与脏检测，否则只改超时时不会触发保存
     () => dicForm.value.timeout,
+    // 历史记录数量同样参与脏检测
+    () => dicForm.value.historyMax,
   ],
   () => {
     configDirty.value = !configsEqual(buildConfig(), configSnapshot)
@@ -624,6 +640,35 @@ function handleConfigClose(done) {
 const editorEl = ref(null)
 let editor = null
 let suppressChange = false
+let errorDecorations = []
+
+// 清除错误行高亮
+function clearErrorHighlight() {
+  if (editor && errorDecorations.length) {
+    editor.deltaDecorations(errorDecorations, [])
+    errorDecorations = []
+  }
+}
+
+// 高亮错误行（红色背景）
+function highlightErrorLine(line) {
+  if (!editor || !line || line < 1) return
+  clearErrorHighlight()
+  errorDecorations = editor.deltaDecorations([], [
+    {
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: true,
+        className: 'dic-error-line',
+        glyphMarginClassName: 'dic-error-glyph',
+        glyphMarginHoverMessage: { value: `错误发生在第 ${line} 行` },
+        overviewRuler: { color: 'rgba(255, 0, 0, 0.6)', position: monaco.editor.OverviewRulerLane.Full },
+      },
+    },
+  ])
+  // 滚动到错误行并居中
+  editor.revealLineInCenter(line)
+}
 
 function createEditor() {
   if (editor || !editorEl.value) return
@@ -663,6 +708,14 @@ function createEditor() {
   })
   // Ctrl/Cmd + S 保存词库
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveContent())
+  // Ctrl/Cmd + Z / Y（含 Ctrl/Cmd + Shift + Z）走自定义历史的上一步/下一步，
+  // 覆盖 monaco 原生 undo/redo，避免两套撤销栈不一致
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => undoContent())
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => redoContent())
+  editor.addCommand(
+    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ,
+    () => redoContent()
+  )
 }
 
 function setEditorValue(text) {
@@ -672,6 +725,43 @@ function setEditorValue(text) {
     editor.setValue(text)
     suppressChange = false
   }
+}
+
+// 应用历史文本（撤销/重做）：计算新旧文本的变更区域，
+// 光标定位到变更区域起点，并平滑滚动到该位置
+function applyHistoryText(target) {
+  dicContent.value = target
+  if (!editor) return
+  const model = editor.getModel()
+  const current = editor.getValue()
+  // 最长公共前缀/后缀定位变更区域（避免重复内容重叠计算）
+  const max = Math.min(current.length, target.length)
+  let start = 0
+  while (start < max && current[start] === target[start]) start++
+  let end = 0
+  const maxEnd = max - start
+  while (
+    end < maxEnd &&
+    current[current.length - 1 - end] === target[target.length - 1 - end]
+  ) {
+    end++
+  }
+  // 内容无变化时保持原光标位置；否则光标落在变更区域起点（目标文本内）
+  let offset
+  if (current === target) {
+    const pos0 = editor.getPosition()
+    offset = pos0 ? model.getOffsetAt(pos0) : 0
+  } else {
+    offset = start
+  }
+  offset = Math.min(offset, target.length)
+  suppressChange = true
+  editor.setValue(target)
+  suppressChange = false
+  // 光标跟随变更区域，并平滑滚动到编辑位置
+  const pos = model.getPositionAt(offset)
+  editor.setPosition(pos)
+  editor.revealPositionInCenter(pos)
 }
 
 // 主题切换同步
@@ -715,7 +805,6 @@ const contentDirty = ref(false)
 const saving = ref(false)
 
 /* ================= 编辑历史（上一步/下一步，持久化到本地） ================= */
-const HISTORY_MAX = 50
 const HISTORY_DEBOUNCE = 800
 const canUndo = ref(false)
 const canRedo = ref(false)
@@ -768,7 +857,9 @@ function pushHistory(content) {
   if (history.stack[history.index] === content) return
   history.stack = history.stack.slice(0, history.index + 1)
   history.stack.push(content)
-  if (history.stack.length > HISTORY_MAX) history.stack.shift()
+  // 条数上限取自运行配置（自定义历史记录数量）
+  const max = Math.max(1, Number(dicForm.value.historyMax) || 50)
+  if (history.stack.length > max) history.stack.shift()
   history.index = history.stack.length - 1
   saveHistory(dicForm.value.path, history)
   updateUndoState()
@@ -802,17 +893,28 @@ function syncAfterHistoryEdit() {
   updateUndoState()
 }
 
+// 撤销/重做前落定待写入的历史（输入防抖期间按下快捷键时也能立即回退到最新内容）
+function flushPendingHistory() {
+  clearTimeout(historyTimer)
+  historyTimer = null
+  if (dicForm.value.path && dicContent.value !== history.stack[history.index]) {
+    pushHistory(dicContent.value)
+  }
+}
+
 function undoContent() {
+  flushPendingHistory()
   if (history.index <= 0) return
   history.index--
-  setEditorValue(history.stack[history.index])
+  applyHistoryText(history.stack[history.index])
   syncAfterHistoryEdit()
 }
 
 function redoContent() {
+  flushPendingHistory()
   if (history.index >= history.stack.length - 1) return
   history.index++
-  setEditorValue(history.stack[history.index])
+  applyHistoryText(history.stack[history.index])
   syncAfterHistoryEdit()
 }
 
@@ -943,6 +1045,7 @@ async function saveContent() {
 /* ================= 运行结果 ================= */
 const result = ref(null)
 const runError = ref('')
+const showOutputFull = ref(false) // 放大查看输出弹窗
 const expandedVars = ref({})
 // 变量区域整个卡片折叠（仅手机端显示折叠功能，默认收起）
 const varsCollapsed = ref(false)
@@ -1088,6 +1191,7 @@ async function runDic(skipSave = false) {
   }
   running.value = true
   runError.value = ''
+  clearErrorHighlight()
   try {
     // 实时生效：运行前自动保存当前编辑的词库内容（由保存运行触发时已保存过，跳过）
     if (!skipSave) {
@@ -1111,6 +1215,10 @@ async function runDic(skipSave = false) {
     // 超时：提示用户词库执行被强行打断
     if (data && data.timedOut) {
       ElMessage.warning('词库执行超时，已强制中断')
+    }
+    // 报错行高亮
+    if (data && data.errorLine) {
+      highlightErrorLine(data.errorLine)
     }
   } catch (e) {
     console.error('词库运行失败:', e)
@@ -1253,6 +1361,7 @@ watch(
       // 切换词库后清除上次结果
       result.value = null
       runError.value = ''
+      clearErrorHighlight()
     }
   }
 )
@@ -1352,6 +1461,18 @@ onBeforeUnmount(() => {
             style="width: 120px"
           />
           <span class="timeout-hint">秒，0 表示不限时</span>
+        </ElFormItem>
+
+        <ElFormItem label="历史记录数量">
+          <ElInputNumber
+            v-model="dicForm.historyMax"
+            :min="1"
+            :max="500"
+            :step="1"
+            :controls="false"
+            style="width: 120px"
+          />
+          <span class="timeout-hint">条，上一步/下一步最大步数</span>
         </ElFormItem>
 
         <ElFormItem label="全局变量">
@@ -1518,16 +1639,27 @@ onBeforeUnmount(() => {
 
     <!-- 运行输出 -->
     <div class="output-zone">
-      <ElButton
-        v-if="result && !runError"
-        class="copy-btn"
-        size="small"
-        type="primary"
-        plain
-        @click="copyOutput"
-      >
-        复制
-      </ElButton>
+      <div class="output-actions">
+        <ElButton
+          size="small"
+          type="primary"
+          plain
+          :icon="FullScreen"
+          :disabled="!result"
+          @click="showOutputFull = true"
+        >
+          放大
+        </ElButton>
+        <ElButton
+          v-if="result && !runError"
+          size="small"
+          type="primary"
+          plain
+          @click="copyOutput"
+        >
+          复制
+        </ElButton>
+      </div>
       <div v-if="runError" class="error-box">{{ runError }}</div>
       <div v-else-if="result" class="output-text">
         <template v-for="(seg, idx) in outputSegments" :key="idx">
@@ -1555,6 +1687,48 @@ onBeforeUnmount(() => {
         <ElEmpty description="选择词库并输入触发文本后点击运行" :image-size="60" />
       </div>
     </div>
+
+    <!-- 放大查看弹窗 -->
+    <ElDialog
+      v-model="showOutputFull"
+      title="运行输出"
+      :width="isMobile ? '96%' : '80%'"
+      :top="isMobile ? '2vh' : '5vh'"
+      destroy-on-close
+    >
+      <div class="output-full-body">
+        <div v-if="runError" class="error-box">{{ runError }}</div>
+        <div v-else-if="result" class="output-text output-text-full">
+          <template v-for="(seg, idx) in outputSegments" :key="idx">
+            <span v-if="seg.type === 'text'">{{ seg.text }}</span>
+            <div v-else class="output-img-wrap" @touchstart="onImgTouchStart">
+              <img
+                :src="seg.src"
+                class="output-img"
+                :alt="'词库图片'"
+                :title="seg.src"
+              />
+              <ElButton
+                v-if="canCopyImage"
+                class="img-copy-btn"
+                size="small"
+                plain
+                @click.stop="copyImage(seg.src)"
+              >
+                复制图片
+              </ElButton>
+            </div>
+          </template>
+        </div>
+        <div v-else class="output-placeholder">
+          <ElEmpty description="暂无输出结果" :image-size="60" />
+        </div>
+      </div>
+      <template #footer>
+        <ElButton @click="copyOutput">复制文本</ElButton>
+        <ElButton type="primary" @click="showOutputFull = false">关闭</ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -1841,11 +2015,13 @@ onBeforeUnmount(() => {
   background: var(--el-fill-color-light);
 }
 
-.copy-btn {
+.output-actions {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 1;
+  display: flex;
+  gap: 8px;
 }
 
 .output-text {
@@ -1857,6 +2033,17 @@ onBeforeUnmount(() => {
   word-break: break-all;
   min-height: 100%;
   box-sizing: border-box;
+}
+
+/* 放大弹窗内输出：取消右侧留白，无高度限制 */
+.output-text-full {
+  padding: 0;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.output-full-body {
+  min-height: 120px;
 }
 
 .output-placeholder {
@@ -2082,5 +2269,18 @@ onBeforeUnmount(() => {
     align-self: flex-end;
     width: 100%;
   }
+}
+</style>
+
+<style>
+/* DIC 调试报错行高亮（Monaco 编辑器装饰器，需非 scoped） */
+.dic-error-line {
+  background-color: rgba(255, 0, 0, 0.15) !important;
+  border-left: 3px solid #e74c3c !important;
+}
+.dic-error-glyph {
+  background: #e74c3c;
+  width: 3px !important;
+  margin-left: 3px;
 }
 </style>

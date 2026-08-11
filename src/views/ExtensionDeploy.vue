@@ -475,8 +475,6 @@ async function doInstall(component, params) {
       // 已安装（同步返回），直接标记
       installStatus[component.value] = true
       ElMessage.success('已安装，无需重复安装')
-    } else if (data.status === 'error') {
-      ElMessage.error(data.error || '安装失败')
     }
   } catch (error) {
     console.error('安装失败:', error)
@@ -533,7 +531,6 @@ async function uninstallComponent(component) {
 function startPolling(taskId) {
   stopPolling()
   consecutiveErrors.value = 0
-  reinstallAttempts.value = 0
   installProgress.reconnecting = false
 
   schedulePoll(taskId)
@@ -701,7 +698,6 @@ function formatTime(time) {
 /* ==================== 页面布局 ==================== */
 .extension-deploy {
   width: 100%;
-  min-height: 100vh;
   padding: 32px;
   box-sizing: border-box;
 }

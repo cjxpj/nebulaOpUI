@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject, watch } from 'vue'
 import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElSwitch, ElImage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
@@ -13,6 +13,7 @@ const opuiForm = ref({
   open: false,
   path: '',
   secret: '',
+  cors: false,
 })
 
 const loading = ref(false)
@@ -33,6 +34,7 @@ async function loadConfig() {
     opuiForm.value.open = Boolean(opuiData.open)
     opuiForm.value.path = opuiData.path || ''
     opuiForm.value.secret = opuiData.secret || ''
+    opuiForm.value.cors = Boolean(opuiData.cors)
     originalSecret = opuiData.secret || ''
   } catch (e) {
     console.error('获取 OPUI 配置失败:', e)
@@ -55,6 +57,7 @@ async function saveOpui() {
           open: opuiForm.value.open,
           path: opuiForm.value.path,
           secret: opuiForm.value.secret,
+          cors: opuiForm.value.cors,
         },
       })
     ElMessage.success('OPUI 配置已保存')
@@ -82,15 +85,36 @@ function genRandomSecret() {
 }
 
 /* ================= 自定义背景图 ================= */
-const DEFAULT_BG = 'https://img.xjh.me/random_img.php?return=302&type=bg&ctype=acg'
+const DEFAULT_BG = '' // 默认无背景图
 
-const bgType = ref('url') // 'url' | 'local'
+// 从 HomeView 注入，避免重复请求 get_bg
+const bgConfig = inject('bgConfig', ref({ type: '', data: '' }))
+const refreshBg = inject('refreshBg', () => {})
+
+const bgType = ref('none') // 'none' | 'url' | 'local'
 const bgUrl = ref('')
 const bgLocalBase64 = ref('')
 const bgFileInput = ref(null)
 const bgLoading = ref(false)
 
+// 监听 HomeView 传入的 bgConfig，同步到本地状态
+function syncBgFromConfig() {
+  const data = bgConfig.value
+  if (data && data.type) {
+    bgType.value = data.type
+    if (data.type === 'url') {
+      bgUrl.value = data.data
+    } else if (data.type === 'local') {
+      bgLocalBase64.value = data.data
+    }
+  } else {
+    bgType.value = 'none'
+  }
+}
+watch(bgConfig, syncBgFromConfig, { immediate: true })
+
 const bgPreview = computed(() => {
+  if (bgType.value === 'none') return ''
   if (bgType.value === 'url' && bgUrl.value) return bgUrl.value
   if (bgType.value === 'local' && bgLocalBase64.value) return bgLocalBase64.value
   return DEFAULT_BG
@@ -99,29 +123,15 @@ const isUsingDefault = computed(() => {
   return !bgUrl.value && !bgLocalBase64.value
 })
 
-async function loadBgConfig() {
-  try {
-    const data = await apiPost({ type: 'get_bg' })
-    if (data && data.type) {
-      bgType.value = data.type
-      if (data.type === 'url') {
-        bgUrl.value = data.data
-      } else if (data.type === 'local') {
-        bgLocalBase64.value = data.data
-      }
-    }
-  } catch (e) {
-    console.error('加载背景图配置失败:', e)
-    // 无自定义背景，使用默认
-  }
-}
-
 async function saveBg() {
   bgLoading.value = true
   try {
     let saveType = ''
     let saveData = ''
-    if (bgType.value === 'url') {
+    if (bgType.value === 'none') {
+      saveType = ''
+      saveData = ''
+    } else if (bgType.value === 'url') {
       if (!bgUrl.value.trim()) {
         ElMessage.warning('请输入背景图链接')
         return
@@ -137,8 +147,7 @@ async function saveBg() {
       saveData = bgLocalBase64.value
     }
     await apiPost({ type: 'save_bg', data: { type: saveType, data: saveData } })
-    // 通知主界面实时刷新背景图，无需刷新页面
-    window.dispatchEvent(new CustomEvent('opui-bg-updated'))
+    refreshBg()
     ElMessage.success('背景图已保存，立即生效')
   } catch (e) {
     console.error('保存背景图失败:', e)
@@ -152,11 +161,10 @@ async function resetBg() {
   bgLoading.value = true
   try {
     await apiPost({ type: 'save_bg', data: { type: '', data: '' } })
-    bgType.value = 'url'
+    bgType.value = 'none'
     bgUrl.value = ''
     bgLocalBase64.value = ''
-    // 通知主界面实时恢复默认背景图
-    window.dispatchEvent(new CustomEvent('opui-bg-updated'))
+    refreshBg()
     ElMessage.success('已恢复默认背景图，立即生效')
   } catch (e) {
     console.error('恢复默认背景图失败:', e)
@@ -195,7 +203,6 @@ function triggerFileInput() {
 }
 
 onMounted(() => {
-  loadBgConfig()
   loadConfig()
 })
 </script>
@@ -256,6 +263,18 @@ onMounted(() => {
           </div>
         </ElFormItem>
 
+        <ElFormItem label="跨域开关">
+          <ElSwitch
+            v-model="opuiForm.cors"
+            :disabled="loadFailed"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+          <div class="form-hint">
+            允许跨域访问管理面板接口，默认关闭
+          </div>
+        </ElFormItem>
+
         <ElFormItem>
           <div class="form-actions">
             <ElButton type="primary" :loading="savingOpui" :disabled="loadFailed" @click="saveOpui">
@@ -271,7 +290,9 @@ onMounted(() => {
       <h3 class="card-title">自定义背景图</h3>
 
       <div class="bg-preview">
+        <div v-if="!bgPreview" class="bg-preview-empty">无背景</div>
         <ElImage
+          v-else
           :src="bgPreview"
           fit="cover"
           class="bg-preview-img"
@@ -284,6 +305,11 @@ onMounted(() => {
         <!-- 来源选择 -->
         <ElFormItem label="图片来源">
           <div class="bg-source-tabs">
+            <button
+              type="button"
+              :class="['bg-source-btn', { active: bgType === 'none' }]"
+              @click="bgType = 'none'"
+            >无背景</button>
             <button
               type="button"
               :class="['bg-source-btn', { active: bgType === 'url' }]"
@@ -446,6 +472,17 @@ onMounted(() => {
   width: 100%;
   height: 160px;
   display: block;
+}
+
+.bg-preview-empty {
+  width: 100%;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+  background: var(--el-fill-color-lighter);
 }
 
 .bg-preview-tag {

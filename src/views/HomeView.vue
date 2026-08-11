@@ -50,6 +50,11 @@
             :default-active="activePage"
             @select="switchPage"
           >
+            <ElMenuItem index="sys-status">
+              <ElIcon><Odometer /></ElIcon>
+              <template #title> 系统状态 </template>
+            </ElMenuItem>
+
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
@@ -93,6 +98,11 @@
             <ElMenuItem index="extension-deploy">
               <ElIcon><Setting /></ElIcon>
               <template #title> 扩展部署 </template>
+            </ElMenuItem>
+
+            <ElMenuItem index="security-check">
+              <ElIcon><Warning /></ElIcon>
+              <template #title> 安全中心 </template>
             </ElMenuItem>
 
             <ElMenuItem index="doc-view">
@@ -129,6 +139,11 @@
             :default-active="activePage"
             @select="onMobileMenuSelect"
           >
+            <ElMenuItem index="sys-status">
+              <ElIcon><Odometer /></ElIcon>
+              <template #title> 系统状态 </template>
+            </ElMenuItem>
+
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
@@ -175,6 +190,11 @@
               <template #title> 扩展部署 </template>
             </ElMenuItem>
 
+            <ElMenuItem index="security-check">
+              <ElIcon><Warning /></ElIcon>
+              <template #title> 安全中心 </template>
+            </ElMenuItem>
+
             <ElMenuItem index="doc-view">
               <ElIcon><Document /></ElIcon>
               <template #title> 查看文档 </template>
@@ -196,7 +216,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, shallowRef, inject } from 'vue'
+import { ref, onMounted, onUnmounted, shallowRef, inject, provide } from 'vue'
 import {
   ElConfigProvider,
   ElMenu,
@@ -222,15 +242,18 @@ import {
   Close,
   SwitchButton,
   Cpu,
+  Odometer,
+  Warning,
 } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
 /* ================= 背景图 ================= */
-const DEFAULT_BG = 'https://img.xjh.me/random_img.php?return=302&type=bg&ctype=acg'
+const DEFAULT_BG = '' // 默认无背景图
 
 const bgImage = ref('')
 const bgBlobUrl = ref(null) // 用于 revoke blob URL
+const bgConfig = ref({ type: '', data: '' }) // 共享给 OpuiPanel，避免重复请求
 
 async function loadBg() {
   let loaded = false
@@ -238,6 +261,10 @@ async function loadBg() {
   revokeBgBlob()
   try {
     const data = await apiPost({ type: 'get_bg' })
+    // 共享原始数据给 OpuiPanel
+    if (data) {
+      bgConfig.value = { type: data.type || '', data: data.data || '' }
+    }
     if (data && data.type && data.data) {
       if (data.type === 'local') {
         // base64 data URI 转为 blob URL，避免 inline style 长度限制
@@ -264,9 +291,14 @@ async function loadBg() {
   }
   // 无自定义背景或加载失败时，延迟加载默认背景图，避免竞争加载
   if (!loaded) {
-    bgImage.value = `url(${DEFAULT_BG})`
+    if (DEFAULT_BG) {
+      bgImage.value = `url(${DEFAULT_BG})`
+    }
   }
 }
+
+provide('bgConfig', bgConfig)
+provide('refreshBg', loadBg)
 
 function revokeBgBlob() {
   if (bgBlobUrl.value) {
@@ -296,12 +328,9 @@ function onMobileMenuSelect(page) {
 
 onMounted(() => {
   loadBg()
-  // 背景图保存后实时刷新，无需刷新页面
-  window.addEventListener('opui-bg-updated', loadBg)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('opui-bg-updated', loadBg)
   revokeBgBlob()
 })
 
@@ -332,9 +361,14 @@ import DocViewer from '@/views/DocViewer.vue'
 import OpuiPanel from '@/views/OpuiPanel.vue'
 // 词库调试
 import DicDebug from '@/views/DicDebug.vue'
+// 系统状态
+import SysStatus from '@/views/SysStatus.vue'
+// 安全中心
+import SecurityCheck from '@/views/SecurityCheck.vue'
 
 const viewMap = {
   'load-page': LoadPage,
+  'sys-status': SysStatus,
   'basic-server': BasicServer,
 	'basic-ws': BasicWS,
 	'basic-ngrok': BasicNgrok,
@@ -353,9 +387,10 @@ const viewMap = {
   'dic-debug': DicDebug,
   'extension-deploy': ExtensionDeploy,
   'doc-view': DocViewer,
+  'security-check': SecurityCheck,
 }
 
-const DEFAULT_PAGE = 'basic-server'
+const DEFAULT_PAGE = 'sys-status'
 const DEFAULT_LOAD_PAGE = 'load-page'
 
 const activePage = ref(DEFAULT_LOAD_PAGE)
