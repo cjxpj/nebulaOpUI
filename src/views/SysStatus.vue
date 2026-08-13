@@ -181,13 +181,20 @@
         <ElButton @click="updateDialogVisible = false">关闭</ElButton>
         <ElButton
           v-if="updateInfo?.update && (updateInfo.down_url || updateInfo.url)"
-          type="primary"
           tag="a"
           :href="updateInfo.down_url || updateInfo.url"
           target="_blank"
           @click="updateDialogVisible = false"
         >
-          下载更新客户端
+          前往下载页面
+        </ElButton>
+        <ElButton
+          v-if="updateInfo?.update && updateInfo.down_url"
+          type="primary"
+          :loading="updating"
+          @click="doOnlineUpdate"
+        >
+          在线更新
         </ElButton>
       </template>
     </ElDialog>
@@ -334,6 +341,7 @@ onUnmounted(() => {
 const checkingUpdate = ref(false)
 const updateDialogVisible = ref(false)
 const updateInfo = ref(null)
+const updating = ref(false)
 
 async function checkUpdate() {
   if (checkingUpdate.value) return
@@ -350,6 +358,27 @@ async function checkUpdate() {
     ElMessage.error('检测更新失败: ' + (e.message || '未知错误'))
   } finally {
     checkingUpdate.value = false
+  }
+}
+
+async function doOnlineUpdate() {
+  if (updating.value) return
+  updating.value = true
+  try {
+    await ElMessageBox.confirm(
+      '即将下载最新版本并自动重启，期间服务会短暂中断，确定继续？',
+      '在线更新',
+      { confirmButtonText: '确定更新', cancelButtonText: '取消', type: 'warning' }
+    )
+    ElMessage.info('正在下载更新，请稍候...')
+    await apiPost({ type: 'online_update' })
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error('在线更新失败:', e)
+      ElMessage.error('在线更新失败: ' + (e.message || '未知错误'))
+    }
+  } finally {
+    updating.value = false
   }
 }
 </script>
