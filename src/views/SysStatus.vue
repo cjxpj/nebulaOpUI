@@ -35,25 +35,25 @@
 
     <!-- 顶部统计卡片 -->
     <div class="stat-grid">
-      <!-- 负载 -->
+      <!-- 综合负载 -->
       <div class="stat-card">
         <div class="stat-head">
           <span class="stat-title">系统负载</span>
           <span v-if="!isMobile" class="stat-icon">⚖️</span>
         </div>
-        <div class="stat-percent load-color">{{ percentText(smoothLoad1) }}</div>
+        <div class="stat-percent load-color">{{ percentText(smoothOverall) }}</div>
         <ElProgress
-          :percentage="Math.min(100, Math.round(smoothLoad1))"
+          :percentage="Math.min(100, Math.round(smoothOverall))"
           :stroke-width="isMobile ? 6 : 8"
           :show-text="false"
           color="#a855f7"
         />
         <div class="load-bars">
-          <span class="load-item" :class="{ warn: smoothLoad1 >= cpu.cores }">1m {{ percentText(smoothLoad1) }}</span>
-          <span class="load-item" :class="{ warn: smoothLoad5 >= cpu.cores }">5m {{ percentText(smoothLoad5) }}</span>
-          <span class="load-item" :class="{ warn: smoothLoad15 >= cpu.cores }">15m {{ percentText(smoothLoad15) }}</span>
+          <span class="load-item">CPU {{ percentText(cpu.percent) }}</span>
+          <span class="load-item">内存 {{ percentText(mem.percent) }}</span>
+          <span class="load-item">IO {{ percentText(diskIo.percent) }}</span>
         </div>
-        <div class="stat-detail">核数参考值 {{ cpu.cores }}</div>
+        <div class="stat-detail">CPU 50% · 内存 30% · IO 20%</div>
       </div>
 
       <!-- CPU -->
@@ -69,7 +69,9 @@
           :show-text="false"
           color="#409eff"
         />
-        <div class="stat-detail">{{ cpu.cores }} 核心<span v-if="!isMobile"> · {{ cpu.model || '未知型号' }}</span></div>
+        <div class="stat-detail">
+          {{ cpu.cores }} 核心<span v-if="!isMobile"> · {{ cpu.model || '未知型号' }}</span><span v-if="cpuTemp > 0"> · {{ cpuTemp.toFixed(0) }}℃</span>
+        </div>
       </div>
 
       <!-- 内存 -->
@@ -125,7 +127,12 @@
       <h3 class="card-title">磁盘分区</h3>
       <div class="disk-table-wrap">
         <ElTable :data="disk" :size="isMobile ? 'small' : 'default'" empty-text="暂无磁盘信息">
-          <ElTableColumn prop="mount" label="挂载点" min-width="100" />
+          <ElTableColumn label="挂载点" min-width="100">
+            <template #default="{ row }">
+              {{ row.mount }}
+              <ElTag v-if="appMount && row.mount === appMount" size="small" type="primary" effect="dark">星云</ElTag>
+            </template>
+          </ElTableColumn>
           <ElTableColumn v-if="!isMobile" prop="fs_type" label="文件系统" min-width="80" />
           <ElTableColumn label="容量" :width="isMobile ? 85 : 110">
             <template #default="{ row }">{{ formatBytes(row.total) }}</template>
@@ -213,11 +220,14 @@ const { isMobile } = useMobile()
 /* ================= 数据 ================= */
 const lastUpdate = ref('')
 const status = ref({
-  cpu: { percent: 0, cores: 0, model: '', load: { load1: 0, load5: 0, load15: 0 } },
+  cpu: { percent: 0, cores: 0, model: '' },
   mem: { total: 0, used: 0, free: 0, percent: 0 },
   disk: [],
   disk_io: { read_rate: 0, write_rate: 0, percent: 0 },
   host: { hostname: '', os: '', platform: '', arch: '', uptime: 0 },
+  overall_load: 0,
+  cpu_temp: 0,
+  app_mount: '',
 })
 
 const cpu = computed(() => status.value.cpu)
@@ -225,11 +235,11 @@ const mem = computed(() => status.value.mem)
 const disk = computed(() => status.value.disk)
 const diskIo = computed(() => status.value.disk_io)
 const host = computed(() => status.value.host)
+const cpuTemp = computed(() => status.value.cpu_temp || 0)
+const appMount = computed(() => status.value.app_mount || '')
 
 /* ================= 数字平滑过渡 ================= */
-const smoothLoad1 = useTransition(() => status.value.cpu.load.load1, { duration: 600 })
-const smoothLoad5 = useTransition(() => status.value.cpu.load.load5, { duration: 600 })
-const smoothLoad15 = useTransition(() => status.value.cpu.load.load15, { duration: 600 })
+const smoothOverall = useTransition(() => status.value.overall_load || 0, { duration: 600 })
 const smoothCpu = useTransition(() => status.value.cpu.percent, { duration: 600 })
 const smoothMem = useTransition(() => status.value.mem.percent, { duration: 600 })
 const smoothDiskIo = useTransition(() => status.value.disk_io.percent, { duration: 600 })

@@ -1,5 +1,11 @@
 <template>
   <div class="login-page">
+    <button
+      class="ws-status-dot"
+      :class="wsConnected ? 'ws-on' : 'ws-off'"
+      :title="wsConnected ? 'WS 已连接（点击编辑连接地址）' : 'WS 未连接（点击编辑连接地址）'"
+      @click="editWsAddress"
+    ></button>
     <div class="login-card">
       <h1 class="login-title">Nebula</h1>
       <p class="login-subtitle">管理面板</p>
@@ -34,9 +40,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { config } from '@/config.js'
-import { apiPost } from '@/api.js'
+import { apiPost, getWsConnected, onWsStatusChange, getStoredWsAddress, saveWsAddress, DEFAULT_WS_ADDRESS } from '@/api.js'
 
 const emit = defineEmits(['login-success'])
 
@@ -47,6 +53,39 @@ const error = ref('')
 const autoLogin = ref(true)
 const keyInput = ref(null)
 const connectionError = ref(false)
+
+// WS 连接状态（右上角红/绿点）
+const wsConnected = ref(getWsConnected())
+const offWsStatus = onWsStatusChange((v) => {
+  wsConnected.value = v
+})
+
+// 点击状态点：编辑 WS 连接地址
+function editWsAddress() {
+  ElMessageBox.prompt(
+    '编辑 WS 连接地址：可填完整地址（如 ws://127.0.0.1:8080/nebula）或路径（如 /nebula/ws），未以 /ws 结尾会自动补全。',
+    'WS 连接地址',
+    {
+      confirmButtonText: '保存并重连',
+      cancelButtonText: '取消',
+      closeOnClickModal: false,
+      inputValue: getStoredWsAddress() || DEFAULT_WS_ADDRESS,
+      inputPlaceholder: '例如 ws://127.0.0.1:8080/nebula',
+      inputValidator: (v) => {
+        const p = (v || '').trim()
+        if (p.startsWith('/')) return true
+        if (/^wss?:\/\//.test(p)) return true
+        return '请输入 / 开头的路径，或 ws://、wss:// 开头的完整地址'
+      },
+    }
+  )
+    .then(({ value }) => {
+      saveWsAddress(value)
+      // 使用新地址重新加载，重新建立连接
+      location.reload()
+    })
+    .catch(() => {})
+}
 
 async function doLogin(k) {
   const keyToTry = k || key.value
@@ -86,6 +125,10 @@ onMounted(async () => {
     keyInput.value?.focus()
   }
 })
+
+onUnmounted(() => {
+  offWsStatus?.()
+})
 </script>
 
 <style scoped>
@@ -95,6 +138,30 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   position: relative;
+}
+
+/* 右上角 WS 连接状态点（红/绿），点击编辑连接地址 */
+.ws-status-dot {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.ws-status-dot.ws-on {
+  background: var(--el-color-success);
+  box-shadow: 0 0 6px rgba(103, 194, 58, 0.6);
+}
+
+.ws-status-dot.ws-off {
+  background: var(--el-color-danger);
+  box-shadow: 0 0 6px rgba(245, 108, 108, 0.6);
 }
 
 .login-card {

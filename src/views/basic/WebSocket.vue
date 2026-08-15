@@ -1,112 +1,94 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
-/* ================= 移动端适配 ================= */
 const { isMobile } = useMobile()
 
-/* ================= 表单数据 ================= */
-const form = ref({
-  websocket: '', // WebSocket 监听地址
-  cors: false, // 跨域开关
-  open: false, // Open 开关
-})
-
 const loading = ref(false)
-const saving = ref(false)
 const loadFailed = ref(false)
+const list = ref([])
 
-/* ================= 初始化加载 ================= */
-async function loadConfig() {
+async function loadList() {
   loading.value = true
   loadFailed.value = false
-
   try {
-    const data = await apiPost({
-        type: 'get_websocket',
-      })
-
-    form.value.websocket = data.websocket || ''
-    form.value.cors = Boolean(data.cors)
-    form.value.open = Boolean(data.open)
+    const data = await apiPost({ type: 'get_websocket' })
+    list.value = data.list || []
   } catch (e) {
-    console.error('获取 WebSocket 配置失败:', e)
+    console.error('获取 WebSocket 监听列表失败:', e)
     loadFailed.value = true
-    ElMessage.error('获取 WebSocket 配置失败')
+    ElMessage.error('获取 WebSocket 监听列表失败')
   } finally {
     loading.value = false
   }
 }
 
-/* ================= 保存配置 ================= */
-async function saveConfig() {
-  if (loadFailed.value) return
-
-  saving.value = true
+async function closeWs(row) {
   try {
-    await apiPost({
-        type: 'save_websocket',
-        data: {
-          websocket: form.value.websocket,
-          cors: form.value.cors,
-          open: form.value.open,
-        },
-      })
-
-    ElMessage.success('配置已保存')
+    await ElMessageBox.confirm(`确定关闭 ${row.addr} 吗？`, '关闭 WebSocket', {
+      confirmButtonText: '关闭',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
   } catch (e) {
-    console.error('保存 WebSocket 配置失败:', e)
-    ElMessage.error('保存配置失败')
-  } finally {
-    saving.value = false
+    return
+  }
+
+  try {
+    await apiPost({ type: 'close_websocket', data: { addr: row.addr } })
+    ElMessage.success('已关闭')
+    await loadList()
+  } catch (e) {
+    console.error('关闭 WebSocket 失败:', e)
+    ElMessage.error('关闭 WebSocket 失败')
   }
 }
 
-onMounted(loadConfig)
+onMounted(loadList)
 </script>
 
 <template>
   <div class="page">
     <div class="page-header">
-      <h2 class="page-title">WebSocket 配置</h2>
-      <p class="page-subtitle">配置 WebSocket 连接参数</p>
+      <h2 class="page-title">WebSocket 监听</h2>
+      <p class="page-subtitle">当前正在监听的 WebSocket 列表</p>
     </div>
 
-    <div class="panel-card">
-      <ElForm :model="form" v-loading="loading" :label-position="isMobile ? 'top' : 'right'">
-        <ElFormItem label="开关">
-          <ElSwitch
-            v-model="form.open"
-            :disabled="loadFailed"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-        </ElFormItem>
-
-        <ElFormItem label="跨域">
-          <ElSwitch
-            v-model="form.cors"
-            :disabled="loadFailed"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-        </ElFormItem>
-
-        <ElFormItem label="访问路径">
-          <ElInput v-model="form.websocket" placeholder="ws" :disabled="loadFailed" />
-        </ElFormItem>
-
-        <!-- 操作区 -->
-        <ElFormItem>
-          <div class="form-actions">
-            <ElButton type="primary" :loading="saving" :disabled="loadFailed" @click="saveConfig">
-              保存配置
+    <div class="panel-card" v-loading="loading">
+      <ElEmpty
+        v-if="!loadFailed && list.length === 0"
+        description="暂无正在监听的 WebSocket"
+      />
+      <ElTable
+        v-else
+        :data="list"
+        :size="isMobile ? 'small' : 'default'"
+        empty-text="暂无正在监听的 WebSocket"
+      >
+        <ElTableColumn prop="addr" label="访问路径" min-width="160" />
+        <ElTableColumn label="跨域" :width="isMobile ? 80 : 120">
+          <template #default="{ row }">
+            <ElTag :type="row.cors ? 'success' : 'info'" size="small">
+              {{ row.cors ? '开启' : '关闭' }}
+            </ElTag>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="状态" :width="isMobile ? 80 : 120">
+          <template #default="{ row }">
+            <ElTag :type="row.open ? 'success' : 'info'" size="small">
+              {{ row.open ? '监听中' : '已停止' }}
+            </ElTag>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="操作" :width="isMobile ? 90 : 130" align="center">
+          <template #default="{ row }">
+            <ElButton type="danger" size="small" link @click="closeWs(row)">
+              关闭
             </ElButton>
-          </div>
-        </ElFormItem>
-      </ElForm>
+          </template>
+        </ElTableColumn>
+      </ElTable>
     </div>
   </div>
 </template>
@@ -147,12 +129,6 @@ onMounted(loadConfig)
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
-.form-actions {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-}
-
 @media (max-width: 768px) {
   .panel-card {
     padding: 20px 16px;
@@ -160,10 +136,6 @@ onMounted(loadConfig)
 
   .page-title {
     font-size: 18px;
-  }
-
-  .form-actions :deep(.el-button) {
-    width: 100%;
   }
 }
 

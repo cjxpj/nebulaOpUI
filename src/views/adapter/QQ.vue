@@ -26,14 +26,15 @@ async function loadConfig() {
       path: item.config.path || 'qq-bot',
       appid: item.config.appid || '',
       secret: item.config.secret || '',
-      at_compat: Boolean(item.config.at_compat),
+      at_compat: item.config.at_compat === undefined ? true : Boolean(item.config.at_compat),
+      filter_slash: item.config.filter_slash === undefined ? true : Boolean(item.config.filter_slash),
       debug: Boolean(item.config.debug),
       ws: Boolean(item.config.ws),
       ws_intents: Number(item.config.ws_intents) || 0,
       remark: item.config.remark || '',
     }))
     if (instances.value.length === 0) {
-      instances.value.push({ section: 'QQ', open: false, dic: 'private/bot/qq', path: 'qq-bot', appid: '', secret: '', at_compat: false, debug: false, ws: true, ws_intents: 0, remark: 'bot1' })
+      instances.value.push({ section: 'QQ', open: false, dic: 'private/bot/qq', path: 'qq-bot', appid: '', secret: '', at_compat: true, filter_slash: true, debug: false, ws: true, ws_intents: 0, remark: 'bot1' })
     }
   } catch (e) { console.error('获取 QQ 配置失败:', e); loadFailed.value = true; ElMessage.error('获取 QQ 配置失败') }
   finally { loading.value = false }
@@ -50,7 +51,7 @@ async function saveInstance(instance, silent) {
   try {
     await apiPost({ type: 'save_qq', data: { section: instance.section, config: {
         open: instance.open, dic: instance.dic, path: instance.path, appid: instance.appid,
-        secret: instance.secret, at_compat: instance.at_compat, debug: instance.debug, ws: instance.ws,
+        secret: instance.secret, at_compat: instance.at_compat, filter_slash: instance.filter_slash, debug: instance.debug, ws: instance.ws,
         ws_intents: instance.ws_intents, remark: instance.remark,
       }}})
     if (!silent) ElMessage.success(`${getTitle(instance)} 已保存`)
@@ -82,7 +83,7 @@ async function toggleWs(instance) {
   try {
     await apiPost({ type: 'save_qq', data: { section: instance.section, config: {
         open: instance.open, dic: instance.dic, path: instance.path, appid: instance.appid,
-        secret: instance.secret, at_compat: instance.at_compat, debug: instance.debug,
+        secret: instance.secret, at_compat: instance.at_compat, filter_slash: instance.filter_slash, debug: instance.debug,
         ws: instance.ws, ws_intents: instance.ws_intents, remark: instance.remark,
       }}})
     ElMessage.success(`${getTitle(instance)} WebSocket 已${instance.ws ? '开启' : '关闭'}`)
@@ -102,7 +103,7 @@ async function addInstance() {
       section: data.section, open: Boolean(data.config.open),
       dic: data.config.dic || 'private/bot/qq', path: data.config.path || 'qq-bot',
       appid: data.config.appid || '', secret: data.config.secret || '',
-      at_compat: Boolean(data.config.at_compat), debug: Boolean(data.config.debug),
+      at_compat: data.config.at_compat === undefined ? true : Boolean(data.config.at_compat), filter_slash: data.config.filter_slash === undefined ? true : Boolean(data.config.filter_slash), debug: Boolean(data.config.debug),
       ws: Boolean(data.config.ws),
       ws_intents: Number(data.config.ws_intents) || 0,
       remark: data.config.remark || `bot${instances.value.length + 1}`,
@@ -234,6 +235,11 @@ onMounted(loadConfig)
               <el-col :xs="24" :sm="12">
                 <ElFormItem label="全量艾特兼容">
                   <ElSwitch v-model="inst.at_compat" size="small" @change="saveInstance(inst, true)" />
+                </ElFormItem>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <ElFormItem label="过滤开头斜杠">
+                  <ElSwitch v-model="inst.filter_slash" size="small" @change="saveInstance(inst, true)" />
                 </ElFormItem>
               </el-col>
               <el-col :xs="24" :sm="12">

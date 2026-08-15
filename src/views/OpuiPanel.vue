@@ -73,6 +73,19 @@ async function saveOpui() {
   }
 }
 
+/* ================= 随机路径 ================= */
+function genRandomPath() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+  let result = ''
+  for (let i = 0; i < 12; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  // 保留当前路径首段作为前缀（默认 nebula），重新生成随机段
+  const cur = opuiForm.value.path.trim().replace(/^\/+/, '')
+  const prefix = cur ? cur.split('/')[0] : 'nebula'
+  opuiForm.value.path = prefix + '/' + result
+}
+
 /* ================= 随机密钥 ================= */
 function genRandomSecret() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -87,65 +100,84 @@ function genRandomSecret() {
 const DEFAULT_BG = '' // 默认无背景图
 
 // 从 HomeView 注入，避免重复请求 get_bg
-const bgConfig = inject('bgConfig', ref({ type: '', data: '' }))
+const bgConfig = inject('bgConfig', ref({ light: { type: '', data: '' }, dark: { type: '', data: '' } }))
 const refreshBg = inject('refreshBg', () => {})
 
-const bgType = ref('none') // 'none' | 'url' | 'local'
-const bgUrl = ref('')
-const bgLocalBase64 = ref('')
+const activeBgTheme = ref('light') // 当前编辑的主题：'light' | 'dark'
+const bgThemes = ref({
+  light: { type: 'none', url: '', localBase64: '', color: '' },
+  dark: { type: 'none', url: '', localBase64: '', color: '' },
+})
 const bgFileInput = ref(null)
 const bgLoading = ref(false)
 
+const curBg = computed(() => bgThemes.value[activeBgTheme.value])
+
+// 单个主题配置项 -> 后台存储项 { type, data, color }
+function toBgItem(t) {
+  if (!t || t.type === 'none') {
+    return { type: '', data: '', color: (t && t.color) || '' }
+  }
+  return { type: t.type, data: t.type === 'url' ? t.url : t.localBase64, color: '' }
+}
+
 // 监听 HomeView 传入的 bgConfig，同步到本地状态
 function syncBgFromConfig() {
-  const data = bgConfig.value
-  if (data && data.type) {
-    bgType.value = data.type
-    if (data.type === 'url') {
-      bgUrl.value = data.data
-    } else if (data.type === 'local') {
-      bgLocalBase64.value = data.data
+  const data = bgConfig.value || {}
+  for (const key of ['light', 'dark']) {
+    const item = data[key] || {}
+    const target = bgThemes.value[key]
+    target.color = item.color || ''
+    if (item.type) {
+      target.type = item.type
+      if (item.type === 'url') {
+        target.url = item.data || ''
+        target.localBase64 = ''
+      } else if (item.type === 'local') {
+        target.localBase64 = item.data || ''
+        target.url = ''
+      }
+    } else {
+      target.type = 'none'
+      target.url = ''
+      target.localBase64 = ''
     }
-  } else {
-    bgType.value = 'none'
   }
 }
 watch(bgConfig, syncBgFromConfig, { immediate: true })
 
 const bgPreview = computed(() => {
-  if (bgType.value === 'none') return ''
-  if (bgType.value === 'url' && bgUrl.value) return bgUrl.value
-  if (bgType.value === 'local' && bgLocalBase64.value) return bgLocalBase64.value
+  const t = curBg.value
+  if (t.type === 'none') return ''
+  if (t.type === 'url' && t.url) return t.url
+  if (t.type === 'local' && t.localBase64) return t.localBase64
   return DEFAULT_BG
 })
 const isUsingDefault = computed(() => {
-  return !bgUrl.value && !bgLocalBase64.value
+  const t = curBg.value
+  return !t.url && !t.localBase64 && !t.color
 })
 
 async function saveBg() {
   bgLoading.value = true
   try {
-    let saveType = ''
-    let saveData = ''
-    if (bgType.value === 'none') {
-      saveType = ''
-      saveData = ''
-    } else if (bgType.value === 'url') {
-      if (!bgUrl.value.trim()) {
-        ElMessage.warning('请输入背景图链接')
-        return
-      }
-      saveType = 'url'
-      saveData = bgUrl.value.trim()
-    } else if (bgType.value === 'local') {
-      if (!bgLocalBase64.value) {
-        ElMessage.warning('请选择本地图片')
-        return
-      }
-      saveType = 'local'
-      saveData = bgLocalBase64.value
+    // 校验当前编辑主题
+    const t = curBg.value
+    if (t.type === 'url' && !t.url.trim()) {
+      ElMessage.warning('请输入背景图链接')
+      return
     }
-    await apiPost({ type: 'save_bg', data: { type: saveType, data: saveData } })
+    if (t.type === 'local' && !t.localBase64) {
+      ElMessage.warning('请选择本地图片')
+      return
+    }
+    await apiPost({
+      type: 'save_bg',
+      data: {
+        light: toBgItem(bgThemes.value.light),
+        dark: toBgItem(bgThemes.value.dark),
+      },
+    })
     refreshBg()
     ElMessage.success('背景图已保存，立即生效')
   } catch (e) {
@@ -159,10 +191,13 @@ async function saveBg() {
 async function resetBg() {
   bgLoading.value = true
   try {
-    await apiPost({ type: 'save_bg', data: { type: '', data: '' } })
-    bgType.value = 'none'
-    bgUrl.value = ''
-    bgLocalBase64.value = ''
+    await apiPost({
+      type: 'save_bg',
+      data: { light: { type: '', data: '' }, dark: { type: '', data: '' } },
+    })
+    for (const key of ['light', 'dark']) {
+      bgThemes.value[key] = { type: 'none', url: '', localBase64: '', color: '' }
+    }
     refreshBg()
     ElMessage.success('已恢复默认背景图，立即生效')
   } catch (e) {
@@ -189,7 +224,7 @@ function handleFileUpload(event) {
 
   const reader = new FileReader()
   reader.onload = (e) => {
-    bgLocalBase64.value = e.target.result
+    curBg.value.localBase64 = e.target.result
   }
   reader.onerror = () => {
     ElMessage.error('图片读取失败')
@@ -232,11 +267,21 @@ onMounted(() => {
         <ElFormItem label="访问路径">
           <ElInput
             v-model="opuiForm.path"
-            placeholder="nebula/xxxx"
+            placeholder="nebula"
             :disabled="loadFailed"
-          />
+          >
+            <template #suffix>
+              <ElButton
+                text
+                :icon="Refresh"
+                :disabled="loadFailed"
+                @click="genRandomPath"
+                title="随机生成访问路径"
+              />
+            </template>
+          </ElInput>
           <div class="form-hint">
-            管理面板的 URL 访问路径
+            管理面板的 URL 访问路径，可用右侧按钮随机生成
           </div>
         </ElFormItem>
 
@@ -288,8 +333,28 @@ onMounted(() => {
     <div class="panel-card panel-card-2">
       <h3 class="card-title">自定义背景图</h3>
 
+      <!-- 亮色 / 暗色背景切换 -->
+      <div class="bg-theme-tabs">
+        <button
+          type="button"
+          :class="['bg-theme-btn', { active: activeBgTheme === 'light' }]"
+          @click="activeBgTheme = 'light'"
+        >亮色背景</button>
+        <button
+          type="button"
+          :class="['bg-theme-btn', { active: activeBgTheme === 'dark' }]"
+          @click="activeBgTheme = 'dark'"
+        >暗色背景</button>
+      </div>
+
       <div class="bg-preview">
-        <div v-if="!bgPreview" class="bg-preview-empty">无背景</div>
+        <div v-if="!bgPreview" class="bg-preview-empty">
+          <template v-if="curBg.color">
+            <span class="bg-color-chip" :style="{ backgroundColor: curBg.color }"></span>
+            <span>{{ curBg.color }}</span>
+          </template>
+          <template v-else>无背景</template>
+        </div>
         <ElImage
           v-else
           :src="bgPreview"
@@ -306,32 +371,43 @@ onMounted(() => {
           <div class="bg-source-tabs">
             <button
               type="button"
-              :class="['bg-source-btn', { active: bgType === 'none' }]"
-              @click="bgType = 'none'"
+              :class="['bg-source-btn', { active: curBg.type === 'none' }]"
+              @click="curBg.type = 'none'"
             >无背景</button>
             <button
               type="button"
-              :class="['bg-source-btn', { active: bgType === 'url' }]"
-              @click="bgType = 'url'"
+              :class="['bg-source-btn', { active: curBg.type === 'url' }]"
+              @click="curBg.type = 'url'"
             >链接</button>
             <button
               type="button"
-              :class="['bg-source-btn', { active: bgType === 'local' }]"
-              @click="bgType = 'local'"
+              :class="['bg-source-btn', { active: curBg.type === 'local' }]"
+              @click="curBg.type = 'local'"
             >本地图片</button>
           </div>
         </ElFormItem>
 
+        <!-- 无背景时自定义背景颜色 -->
+        <ElFormItem v-if="curBg.type === 'none'" label="背景颜色">
+          <div class="bg-color-wrap">
+            <ElColorPicker v-model="curBg.color" />
+            <ElButton v-if="curBg.color" text @click="curBg.color = ''">清空</ElButton>
+          </div>
+          <div class="form-hint">
+            无背景图时可设置纯色背景，留空则使用默认背景色
+          </div>
+        </ElFormItem>
+
         <!-- URL 输入 -->
-        <ElFormItem v-if="bgType === 'url'" label="图片链接">
+        <ElFormItem v-if="curBg.type === 'url'" label="图片链接">
           <ElInput
-            v-model="bgUrl"
+            v-model="curBg.url"
             placeholder="https://example.com/bg.jpg"
           />
         </ElFormItem>
 
         <!-- 本地图片上传 -->
-        <ElFormItem v-if="bgType === 'local'" label="选择图片">
+        <ElFormItem v-if="curBg.type === 'local'" label="选择图片">
           <div class="bg-upload-wrap">
             <ElButton native-type="button" @click="triggerFileInput">
               选择图片文件
@@ -343,7 +419,7 @@ onMounted(() => {
               class="bg-file-input"
               @change="handleFileUpload"
             />
-            <span v-if="bgLocalBase64" class="bg-upload-name">已选择图片</span>
+            <span v-if="curBg.localBase64" class="bg-upload-name">已选择图片</span>
           </div>
           <div class="form-hint">
             支持 JPG、PNG、GIF、WebP，大小不超过 5MB
@@ -484,6 +560,22 @@ onMounted(() => {
   background: var(--el-fill-color-lighter);
 }
 
+.bg-color-chip {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid var(--el-border-color);
+}
+
+.bg-color-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .bg-preview-tag {
   position: absolute;
   top: 8px;
@@ -497,6 +589,30 @@ onMounted(() => {
 
 .bg-preview-tag-custom {
   background: var(--el-color-primary);
+}
+
+.bg-theme-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.bg-theme-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.bg-theme-btn.active {
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  color: #fff;
 }
 
 .bg-source-tabs {

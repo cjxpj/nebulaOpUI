@@ -7,7 +7,7 @@
 import { ref, onMounted, onUnmounted, provide } from 'vue'
 import HomeView from '@/views/HomeView.vue'
 import Login from '@/views/Login.vue'
-import { apiPost, onPush, disconnect, onUnauthorized } from '@/api.js'
+import { apiPost, onPush, disconnect, onUnauthorized, onWsAddressRequired, getStoredWsAddress, saveWsAddress, DEFAULT_WS_ADDRESS } from '@/api.js'
 import { clearDocCache } from '@/docCache.js'
 
 /* ================= 主题 ================= */
@@ -37,6 +37,34 @@ const needLogin = ref(true)
 onUnauthorized(() => {
   clearDocCache()
   needLogin.value = true
+})
+
+// 特殊域名下 WS 连接失败：要求手动填写 WS 地址（反向代理域名无法转发 WS 时，可直连局域网服务器）
+onWsAddressRequired(() => {
+  ElMessageBox.prompt(
+    '当前域名无法建立 WebSocket 连接，请填写可用的 WS 地址：完整地址（如 ws://127.0.0.1:8080/nebula/ws，用于直连局域网服务器）或路径（如 /nebula/ws）。',
+    'WS 连接配置',
+    {
+      confirmButtonText: '保存并重试',
+      cancelButtonText: '取消',
+      closeOnClickModal: false,
+      closeOnPressEscape: false,
+      inputValue: getStoredWsAddress() || DEFAULT_WS_ADDRESS,
+      inputPlaceholder: '例如 ws://127.0.0.1:8080/nebula/ws 或 /nebula/ws',
+      inputValidator: (v) => {
+        const p = (v || '').trim()
+        if (p.startsWith('/')) return true
+        if (/^wss?:\/\//.test(p)) return true
+        return '请输入 / 开头的路径，或 ws://、wss:// 开头的完整地址'
+      },
+    }
+  )
+    .then(({ value }) => {
+      saveWsAddress(value)
+      // 使用新地址重新加载，重新建立连接
+      location.reload()
+    })
+    .catch(() => {})
 })
 
 function onLoginSuccess() {

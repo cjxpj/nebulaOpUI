@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, inject, h, nextTick } from 'vue'
-import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen } from '@element-plus/icons-vue'
+import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen, Brush, Close, Plus } from '@element-plus/icons-vue'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 // 编辑器核心特性（contrib），不含内置语言与语言服务
 import 'monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js'
@@ -32,6 +32,8 @@ import 'monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon-modifiers.
 import EditorWorker from '../../node_modules/monaco-editor/esm/vs/editor/editor.worker.js?worker'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
+// 词库语法高亮自定义配色（JSON 配置）
+import dicHighlight from '@/dicHighlight.json'
 
 /* ================= Monaco Worker 配置 ================= */
 self.MonacoEnvironment = {
@@ -42,40 +44,134 @@ self.MonacoEnvironment = {
 
 /* ================= 注册词库语言高亮 ================= */
 monaco.languages.register({ id: 'nebula' })
-monaco.languages.setMonarchTokensProvider('nebula', {
-  defaultToken: '',
-  tokenizer: {
-    root: [
-      [/\/\/.*$/, 'comment'],
-      [/\/\*/, 'comment', '@commentBlock'],
-      [/±/, 'string', '@pic'],
-      [/\$/, 'keyword', '@cmd'],
-      [/%[^\n%]*%/, 'variable.predefined'],
-      [/"""/, 'string', '@markdown'],
-      [/#[^\n#]+#/, 'keyword'],
-      [/\[[FL]\]/, 'keyword'],
-      [/\b\d+\b/, 'number'],
-    ],
-    cmd: [
-      [/\$/, 'keyword', '@pop'],
-      [/[^$\n]+/, 'keyword'],
-    ],
-    pic: [
-      [/±/, 'string', '@pop'],
-      [/[^±\n]+/, 'string'],
-    ],
-    markdown: [
-      [/"""/, 'string', '@pop'],
-      [/[^"]+/, 'string'],
-      [/"/, 'string'],
-    ],
-    commentBlock: [
-      [/\*\//, 'comment', '@pop'],
-      [/[^*]+/, 'comment'],
-      [/./, 'comment'],
-    ],
+// 注释语法配置：Ctrl+/ 行注释（多行每行加 //）
+monaco.languages.setLanguageConfiguration('nebula', {
+  comments: {
+    lineComment: '//',
+    blockComment: ['/*', '*/'],
   },
 })
+// 构建 Monarch 分词器：root 顶部追加自定义正则（优先），其后为内置 tokens 规则
+function buildNebulaTokenizer(customRules, tokens) {
+  const customRoot = (customRules || []).map((r) => [new RegExp(r.regex), r.token])
+  const pairs = ((tokens && tokens.pairs) || []).map((p, i) => ({ state: `pair${i}`, ...p }))
+  const simpleRules = ((tokens && tokens.rules) || []).map((r) => [new RegExp(r.regex), r.token])
+
+  const tokenizer = {
+    root: [
+      ...customRoot,
+      ...pairs.map((p) => [new RegExp(p.open), p.token, `@${p.state}`]),
+      ...simpleRules,
+    ],
+  }
+  for (const p of pairs) {
+    tokenizer[p.state] = [
+      [new RegExp(p.close), p.token, '@pop'],
+      ...p.content.map((c) => [new RegExp(c), p.token]),
+    ]
+  }
+  return { defaultToken: '', tokenizer }
+}
+
+/* ================= 自定义语法高亮主题（JSON 配置） ================= */
+const HIGHLIGHT_CONFIG_KEY = 'nebula_dic_highlight_config'
+const HEX_COLOR_RE = /^#?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/
+
+// 校验并规范化 token 识别规则（正则）
+function normalizeTokens(tokens) {
+  const src = (tokens && typeof tokens === 'object' ? tokens : dicHighlight['分词规则']) || {}
+  const rules = (Array.isArray(src['规则']) ? src['规则'] : []).map((r, i) => {
+    if (!r || typeof r !== 'object' || typeof r['正则'] !== 'string' || !r['正则'] || typeof r['标记'] !== 'string' || !r['标记']) {
+      throw new Error(`分词规则.规则[${i}] 需包含 正则 与 标记`)
+    }
+    try { new RegExp(r['正则']) } catch (e) { throw new Error(`分词规则.规则[${i}].正则 无效: ${e.message}`) }
+    return { regex: r['正则'], token: r['标记'] }
+  })
+  const pairs = (Array.isArray(src['配对']) ? src['配对'] : []).map((p, i) => {
+    if (!p || typeof p !== 'object' || typeof p['开始'] !== 'string' || !p['开始'] || typeof p['结束'] !== 'string' || !p['结束'] || typeof p['标记'] !== 'string' || !p['标记']) {
+      throw new Error(`分词规则.配对[${i}] 需包含 开始、结束、标记`)
+    }
+    try { new RegExp(p['开始']) } catch (e) { throw new Error(`分词规则.配对[${i}].开始 无效: ${e.message}`) }
+    try { new RegExp(p['结束']) } catch (e) { throw new Error(`分词规则.配对[${i}].结束 无效: ${e.message}`) }
+    const content = (Array.isArray(p['内容']) ? p['内容'] : (typeof p['内容'] === 'string' && p['内容'] ? [p['内容']] : []))
+      .map((c) => {
+        if (typeof c !== 'string' || !c) throw new Error(`分词规则.配对[${i}].内容 必须是非空字符串`)
+        try { new RegExp(c) } catch (e) { throw new Error(`分词规则.配对[${i}].内容 无效: ${e.message}`) }
+        return c
+      })
+    if (!content.length) throw new Error(`分词规则.配对[${i}].内容 不能为空`)
+    return { open: p['开始'], close: p['结束'], content, token: p['标记'] }
+  })
+  return { rules, pairs }
+}
+
+// 校验并补齐高亮配置，保证 defineTheme 所需字段齐全（颜色缺失会触发运行时异常）
+// 说明：中文键只存在于配置 JSON 层，normalize 后统一转回 Monaco 所需的英文键（base/inherit/rules/colors/token/foreground）
+function normalizeHighlightConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object' || !cfg['暗色主题'] || !cfg['亮色主题']) {
+    throw new Error('配置必须包含 暗色主题 与 亮色主题 两个主题')
+  }
+  const normalizeTheme = (t, fallbackBase) => ({
+    base: ['vs', 'vs-dark', 'hc-black', 'hc-light'].includes(t?.['基础主题']) ? t['基础主题'] : fallbackBase,
+    inherit: t['继承默认'] !== false,
+    rules: Array.isArray(t['规则']) ? t['规则'].map((r) => ({ token: r['标记'], foreground: r['前景色'] })) : [],
+    colors: t['颜色'] && typeof t['颜色'] === 'object' ? t['颜色'] : {},
+  })
+  const rawCustom = Array.isArray(cfg['自定义规则']) ? cfg['自定义规则'] : []
+  const customRules = rawCustom.map((r, i) => {
+    if (!r || typeof r !== 'object') throw new Error(`自定义规则[${i}] 必须是对象`)
+    if (typeof r['正则'] !== 'string' || !r['正则']) throw new Error(`自定义规则[${i}].正则 不能为空`)
+    if (typeof r['颜色'] !== 'string' || !HEX_COLOR_RE.test(r['颜色'])) {
+      throw new Error(`自定义规则[${i}].颜色 必须是 6 位十六进制色值（如 #FF5500）`)
+    }
+    try {
+      new RegExp(r['正则'])
+    } catch (e) {
+      throw new Error(`自定义规则[${i}].正则 无效: ${e.message}`)
+    }
+    return { token: `custom.${i}`, regex: r['正则'], color: r['颜色'] }
+  })
+  return {
+    dark: normalizeTheme(cfg['暗色主题'], 'vs-dark'),
+    light: normalizeTheme(cfg['亮色主题'], 'vs'),
+    tokens: normalizeTokens(cfg['分词规则'] ?? dicHighlight['分词规则']),
+    customRules,
+  }
+}
+
+function applyHighlightConfig(cfg) {
+  const customColors = (cfg.customRules || []).map((r) => ({ token: r.token, foreground: r.color }))
+  monaco.editor.defineTheme('nebula-dark', { ...cfg.dark, rules: [...cfg.dark.rules, ...customColors] })
+  monaco.editor.defineTheme('nebula-light', { ...cfg.light, rules: [...cfg.light.rules, ...customColors] })
+  monaco.languages.setMonarchTokensProvider('nebula', buildNebulaTokenizer(cfg.customRules || [], cfg.tokens))
+}
+
+// 读取已保存的原始高亮配置（用于弹窗展示），未保存则回退默认 JSON
+function loadRawHighlightConfig() {
+  try {
+    const raw = localStorage.getItem(HIGHLIGHT_CONFIG_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch (e) {
+    /* 忽略非法存储 */
+  }
+  return dicHighlight
+}
+
+// 读取并规范化高亮配置，失败时回退默认
+function loadHighlightConfig() {
+  try {
+    return normalizeHighlightConfig(loadRawHighlightConfig())
+  } catch (e) {
+    return normalizeHighlightConfig(dicHighlight)
+  }
+}
+
+// 初始化高亮主题与分词器
+try {
+  applyHighlightConfig(loadHighlightConfig())
+} catch (e) {
+  applyHighlightConfig(normalizeHighlightConfig(dicHighlight))
+}
 
 /* ================= 代码补全（命令/变量/关键字） ================= */
 // 无子命令的词库命令（来源：dic/funcs/registry.go 与 bot 动态注入）
@@ -370,6 +466,11 @@ monaco.languages.registerCompletionItemProvider('nebula', {
   },
 })
 
+/* ================= 外部传入词库路径（文件管理跳转） ================= */
+const props = defineProps({
+  initialPath: { type: String, default: '' },
+})
+
 /* ================= 移动端适配 ================= */
 const { isMobile } = useMobile()
 
@@ -446,6 +547,60 @@ const autoSave = ref(false)
 const running = ref(false)
 const configVisible = ref(false)
 
+/* ================= 高亮配置（localStorage 自定义高亮 JSON） ================= */
+const highlightVisible = ref(false)
+const highlightText = ref('')
+const highlightError = ref('')
+
+function openHighlightConfig() {
+  highlightError.value = ''
+  try {
+    highlightText.value = JSON.stringify(loadRawHighlightConfig(), null, 2)
+  } catch (e) {
+    highlightText.value = JSON.stringify(dicHighlight, null, 2)
+  }
+  highlightVisible.value = true
+}
+
+function saveHighlightConfig() {
+  let raw
+  try {
+    raw = JSON.parse(highlightText.value)
+  } catch (e) {
+    highlightError.value = 'JSON 解析失败: ' + (e.message || '')
+    return
+  }
+  let cfg
+  try {
+    cfg = normalizeHighlightConfig(raw)
+  } catch (e) {
+    highlightError.value = e.message || '配置校验失败'
+    return
+  }
+  try {
+    applyHighlightConfig(cfg)
+    localStorage.setItem(HIGHLIGHT_CONFIG_KEY, JSON.stringify(raw))
+  } catch (e) {
+    highlightError.value = '保存失败: ' + (e.message || '未知错误')
+    return
+  }
+  ElMessage.success('高亮配置已保存')
+  highlightVisible.value = false
+}
+
+function resetHighlightConfig() {
+  try {
+    localStorage.removeItem(HIGHLIGHT_CONFIG_KEY)
+    const def = normalizeHighlightConfig(dicHighlight)
+    applyHighlightConfig(def)
+    highlightText.value = JSON.stringify(dicHighlight, null, 2)
+    highlightError.value = ''
+    ElMessage.success('已恢复默认高亮')
+  } catch (e) {
+    highlightError.value = '恢复失败: ' + (e.message || '未知错误')
+  }
+}
+
 /* ================= 运行配置（仅存后端：打开时读取，关闭时确认保存） ================= */
 const NEVER_ASK_CONFIG_KEY = 'nebula_dic_debug_never_ask'
 const configDirty = ref(false)
@@ -457,7 +612,6 @@ const neverAsk = ref(false)
 function configsEqual(a, b) {
   if (!a || !b) return false
   return (
-    (a.path || '') === (b.path || '') &&
     (a.trigger || '') === (b.trigger || '') &&
     Number(a.timeout || 0) === Number(b.timeout || 0) &&
     Number(a.historyMax || 0) === Number(b.historyMax || 0) &&
@@ -470,7 +624,6 @@ function configsEqual(a, b) {
 // 应用配置对象到表单
 function applyConfig(saved) {
   if (!saved) return
-  if (saved.path) dicForm.value.path = saved.path
   if (saved.trigger !== undefined) dicForm.value.trigger = saved.trigger
   if (saved.g !== undefined) {
     // 兼容旧数据（字符串，每行 key=value）与新数据（数组）
@@ -516,10 +669,9 @@ async function loadConfig() {
   }
 }
 
-// 构造配置对象
+// 构造配置对象（词库文件由标签栏「打开」选择，不纳入运行配置）
 function buildConfig() {
   return {
-    path: dicForm.value.path,
     trigger: dicForm.value.trigger,
     // g 需拷贝一份，避免快照与表单共享同一数组引用导致脏检测失效
     g: [...dicForm.value.g],
@@ -550,7 +702,6 @@ async function saveConfig() {
 // 配置变化时精确比对快照，判断是否真正修改
 watch(
   [
-    () => dicForm.value.path,
     () => dicForm.value.trigger,
     () => dicForm.value.g,
     saveRun,
@@ -674,7 +825,7 @@ function createEditor() {
   editor = monaco.editor.create(editorEl.value, {
     value: dicContent.value,
     language: 'nebula',
-    theme: isDarkMode.value ? 'vs-dark' : 'vs',
+    theme: isDarkMode.value ? 'nebula-dark' : 'nebula-light',
     automaticLayout: true,
     minimap: { enabled: false },
     fontSize: 13,
@@ -707,6 +858,10 @@ function createEditor() {
   })
   // Ctrl/Cmd + S 保存词库
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveContent())
+  // Ctrl/Cmd + Space 手动触发补全（显式绑定，避免默认键位失效）
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+    editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
+  })
   // Ctrl/Cmd + Z / Y（含 Ctrl/Cmd + Shift + Z）走自定义历史的上一步/下一步，
   // 覆盖 monaco 原生 undo/redo，避免两套撤销栈不一致
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => undoContent())
@@ -715,6 +870,8 @@ function createEditor() {
     monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ,
     () => redoContent()
   )
+  // 禁用 Shift+Alt+A 块注释快捷键（块注释不提供快捷键）
+  editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyA, () => {})
 }
 
 function setEditorValue(text) {
@@ -765,7 +922,7 @@ function applyHistoryText(target) {
 
 // 主题切换同步
 watch(isDarkMode, (dark) => {
-  editor?.updateOptions({ theme: dark ? 'vs-dark' : 'vs' })
+  editor?.updateOptions({ theme: dark ? 'nebula-dark' : 'nebula-light' })
 })
 
 /* ================= 词库内容本地缓存 ================= */
@@ -866,8 +1023,11 @@ function pushHistory(content) {
 
 function schedulePushHistory() {
   clearTimeout(historyTimer)
+  // 记录触发时的路径：切换标签后旧标签的历史不再写入
+  const path = dicForm.value.path.trim()
+  if (!path) return
   historyTimer = setTimeout(() => {
-    if (dicForm.value.path && dicContent.value !== history.stack[history.index]) {
+    if (path === dicForm.value.path.trim() && dicContent.value !== history.stack[history.index]) {
       pushHistory(dicContent.value)
     }
   }, HISTORY_DEBOUNCE)
@@ -983,15 +1143,17 @@ let autoSaveTimer = null
 function scheduleAutoSave() {
   clearTimeout(autoSaveTimer)
   if (!autoSave.value) return
+  // 记录触发时的路径：切换标签后旧标签的自动保存作废，避免写错文件
+  const path = dicForm.value.path.trim()
+  if (!path) return
   autoSaveTimer = setTimeout(() => {
-    if (dicForm.value.path.trim() && contentDirty.value) {
-      doAutoSave()
+    if (path === dicForm.value.path.trim() && contentDirty.value) {
+      doAutoSave(path)
     }
   }, AUTO_SAVE_DEBOUNCE)
 }
 
-async function doAutoSave() {
-  const path = dicForm.value.path.trim()
+async function doAutoSave(path) {
   if (!path) return
   try {
     await apiPost({
@@ -1045,7 +1207,10 @@ async function saveContent() {
 const result = ref(null)
 const runError = ref('')
 const showOutputFull = ref(false) // 放大查看输出弹窗
+// 长字符串变量展开状态：节点 id -> true
 const expandedVars = ref({})
+// 类对象成员折叠状态：节点 id -> true（默认折叠，点击展开查看成员变量）
+const collapsedClasses = ref({})
 // 变量区域整个卡片折叠（仅手机端显示折叠功能，默认收起）
 const varsCollapsed = ref(false)
 // 变量面板内容区 DOM（用于高度动画）
@@ -1090,17 +1255,17 @@ function toggleVarsPanel() {
 // 变量值超长折叠：超过 100 字符显示省略并支持展开/收起
 const VAR_LIMIT = 100
 
-function varKey(scope, key) {
-  return scope + ':' + key
+// 生成变量的唯一标识（作用域 + 层级路径），用于折叠/展开状态
+function varNodeId(scope, path) {
+  return scope + ':' + path.join('.')
 }
 
-function isVarExpanded(scope, key) {
-  return !!expandedVars.value[varKey(scope, key)]
+function isVarExpanded(id) {
+  return !!expandedVars.value[id]
 }
 
-function toggleVar(scope, key) {
-  const k = varKey(scope, key)
-  expandedVars.value[k] = !expandedVars.value[k]
+function toggleVar(id) {
+  expandedVars.value[id] = !expandedVars.value[id]
 }
 
 function isVarLong(val) {
@@ -1108,11 +1273,58 @@ function isVarLong(val) {
   return typeof s === 'string' && s.length > VAR_LIMIT
 }
 
-function displayVarVal(scope, key, val) {
+function displayVarVal(id, val) {
   const s = val && val.v !== undefined ? val.v : String(val)
-  if (isVarExpanded(scope, key) || !isVarLong(val)) return s
+  if (isVarExpanded(id) || !isVarLong(val)) return s
   return s.slice(0, VAR_LIMIT) + '…'
 }
+
+// 是否为可折叠的类对象（含成员变量）
+function isClassVal(val) {
+  return (
+    val &&
+    val.children &&
+    typeof val.children === 'object' &&
+    !Array.isArray(val.children) &&
+    Object.keys(val.children).length > 0
+  )
+}
+
+function isClassCollapsed(id) {
+  return !!collapsedClasses.value[id]
+}
+
+function toggleClass(id) {
+  if (collapsedClasses.value[id]) {
+    delete collapsedClasses.value[id]
+  } else {
+    collapsedClasses.value[id] = true
+  }
+}
+
+// 将某个作用域（局部/全局）的变量树展开为可见行，类对象成员按折叠状态展开
+function collectVarRows(scope, vars) {
+  const rows = []
+  const walk = (key, val, depth, path) => {
+    const id = varNodeId(scope, path)
+    const hasChildren = isClassVal(val)
+    const collapsed = hasChildren && isClassCollapsed(id)
+    rows.push({ key, val, depth, id, hasChildren, collapsed })
+    if (hasChildren && !collapsed) {
+      for (const [ck, cv] of Object.entries(val.children)) {
+        walk(ck, cv, depth + 1, [...path, ck])
+      }
+    }
+  }
+  for (const [key, val] of Object.entries(vars || {})) {
+    walk(key, val, 0, [key])
+  }
+  return rows
+}
+
+// 局部/全局变量可见行（类对象折叠后成员不再显示）
+const varRowsP = computed(() => collectVarRows('P', result.value?.vars?.P))
+const varRowsG = computed(() => collectVarRows('G', result.value?.vars?.G))
 
 // 解析全局变量列表（每项 key=value，# 开头为注释）
 function parseGInput(gVars) {
@@ -1345,6 +1557,80 @@ const outputSegments = computed(() => {
   return parseOutputSegments(String(r.output || ''))
 })
 
+/* ================= 多开标签页（多文件编辑） ================= */
+// 已打开的标签页：{ path, dirty }，dirty 表示存在未保存修改（内容已缓存本地，重新打开可恢复）
+const openTabs = ref([])
+const openFileVisible = ref(false)
+const openFilePath = ref('')
+
+function activeTab() {
+  const p = dicForm.value.path.trim()
+  return openTabs.value.find((t) => t.path === p) || null
+}
+
+// 标签显示名：路径最后一段
+function tabLabel(path) {
+  const idx = path.lastIndexOf('/')
+  return idx >= 0 ? path.slice(idx + 1) : path
+}
+
+// 打开词库文件：新增标签并切换到该文件（内容加载由 path watch 统一处理）
+function openTab(path) {
+  const p = (path || '').trim()
+  if (!p) return
+  if (!openTabs.value.some((t) => t.path === p)) {
+    openTabs.value.push({ path: p, dirty: false })
+  }
+  dicForm.value.path = p
+}
+
+function switchTab(path) {
+  if (dicForm.value.path !== path) dicForm.value.path = path
+}
+
+// 关闭标签：关闭激活标签时自动切换到相邻标签；有未保存修改时需确认（内容已缓存，重新打开可恢复）
+function closeTab(path) {
+  const idx = openTabs.value.findIndex((t) => t.path === path)
+  if (idx < 0) return
+  const tab = openTabs.value[idx]
+  const doClose = () => {
+    openTabs.value.splice(idx, 1)
+    if (dicForm.value.path.trim() === path) {
+      const next = openTabs.value[Math.min(idx, openTabs.value.length - 1)]
+      dicForm.value.path = next ? next.path : ''
+    }
+  }
+  if (!tab.dirty) {
+    doClose()
+    return
+  }
+  ElMessageBox.confirm(
+    '该词库有未保存的修改（已缓存在本地，重新打开可恢复），确定关闭？',
+    '关闭词库',
+    { confirmButtonText: '关闭', cancelButtonText: '取消', type: 'warning' }
+  )
+    .then(doClose)
+    .catch(() => {})
+}
+
+// 打开词库弹窗确认
+function confirmOpenFile() {
+  const p = openFilePath.value.trim()
+  if (!p) {
+    ElMessage.warning('请选择词库文件')
+    return
+  }
+  openTab(p)
+  openFilePath.value = ''
+  openFileVisible.value = false
+}
+
+// 同步当前激活标签的修改标记
+watch(contentDirty, (v) => {
+  const tab = activeTab()
+  if (tab) tab.dirty = v
+})
+
 /* ================= 切换词库时重新加载内容 ================= */
 watch(
   () => dicForm.value.path,
@@ -1356,8 +1642,24 @@ watch(
       return
     }
     if (p) {
+      // 确保该文件已在标签栏打开
+      if (!openTabs.value.some((t) => t.path === p)) {
+        openTabs.value.push({ path: p, dirty: false })
+      }
       loadDicContent(p)
+      // 同步新标签的修改标记（内容加载可能不改变 contentDirty 值，需手动对齐）
+      const tab = openTabs.value.find((t) => t.path === p)
+      if (tab) tab.dirty = contentDirty.value
       // 切换词库后清除上次结果
+      result.value = null
+      runError.value = ''
+      clearErrorHighlight()
+    } else {
+      // 关闭全部标签：清空编辑器与历史
+      setEditorValue('')
+      contentDirty.value = false
+      history = { stack: [''], index: 0 }
+      updateUndoState()
       result.value = null
       runError.value = ''
       clearErrorHighlight()
@@ -1369,6 +1671,12 @@ watch(
 onMounted(() => {
   loadConfig()
   createEditor()
+  // 未打开任何词库时默认打开调试词库；外部传入（文件管理跳转）时优先打开指定词库
+  if (props.initialPath) {
+    openTab(props.initialPath)
+  } else if (!dicForm.value.path.trim()) {
+    openTab(DEFAULT_DEBUG_DIC)
+  }
   // 触摸图片外区域时隐藏「复制图片」按钮
   document.addEventListener('touchstart', onDocTouchStart, { passive: true })
   // 仅手机端默认折叠变量区域；电脑端保持展开显示
@@ -1396,9 +1704,14 @@ onBeforeUnmount(() => {
         <h2 class="page-title">词库调试</h2>
         <p class="page-subtitle">实时编辑词库并运行查看输出结果与变量</p>
       </div>
-      <ElButton type="primary" :icon="Setting" @click="configVisible = true">
-        运行配置
-      </ElButton>
+      <div class="page-header-actions">
+        <ElButton :icon="Brush" @click="openHighlightConfig">
+          高亮配置
+        </ElButton>
+        <ElButton type="primary" :icon="Setting" @click="configVisible = true">
+          运行配置
+        </ElButton>
+      </div>
     </div>
 
     <!-- 运行配置弹窗 -->
@@ -1410,28 +1723,6 @@ onBeforeUnmount(() => {
       :before-close="handleConfigClose"
     >
       <ElForm :model="dicForm" :label-position="isMobile ? 'top' : 'right'">
-        <ElFormItem label="词库文件">
-          <div class="path-row">
-            <ElSelect
-              v-model="dicForm.path"
-              filterable
-              remote
-              :remote-method="searchDicFiles"
-              allow-create
-              :loading="searchLoading"
-              placeholder="选择或输入词库路径，输入关键字可搜索过滤"
-              style="flex: 1"
-            >
-              <ElOption
-                v-for="file in dicFiles"
-                :key="file"
-                :label="file"
-                :value="file"
-              />
-            </ElSelect>
-          </div>
-        </ElFormItem>
-
         <ElFormItem label="保存方式">
           <div class="auto-run-inline">
             <ElSwitch v-model="saveRun" />
@@ -1514,10 +1805,69 @@ onBeforeUnmount(() => {
       </ElForm>
     </ElDialog>
 
+    <!-- 打开词库弹窗 -->
+    <ElDialog
+      v-model="openFileVisible"
+      title="打开词库"
+      :width="isMobile ? '92%' : 480"
+      destroy-on-close
+      @closed="openFilePath = ''"
+    >
+      <ElSelect
+        v-model="openFilePath"
+        filterable
+        remote
+        :remote-method="searchDicFiles"
+        allow-create
+        :loading="searchLoading"
+        placeholder="选择或输入词库路径，输入关键字可搜索过滤"
+        style="width: 100%"
+      >
+        <ElOption
+          v-for="file in dicFiles"
+          :key="file"
+          :label="file"
+          :value="file"
+        />
+      </ElSelect>
+      <template #footer>
+        <ElButton @click="openFileVisible = false">取消</ElButton>
+        <ElButton type="primary" @click="confirmOpenFile">打开</ElButton>
+      </template>
+    </ElDialog>
+
+    <!-- 高亮配置弹窗 -->
+    <ElDialog
+      v-model="highlightVisible"
+      title="高亮配置"
+      :width="isMobile ? '92%' : 560"
+      destroy-on-close
+    >
+      <div class="highlight-dialog-body">
+        <p class="highlight-tip">
+          自定义词库编辑器语法高亮。暗色主题 / 亮色主题 为主题配色（规则 为 标记 颜色，颜色 为编辑器颜色）；
+          分词规则 为标记识别规则（规则 单条正则、配对 成对定界符），自定义规则 为额外正则高亮。
+          正则按 JS 语法，JSON 中反斜杠需写成 \\（例如 \\$）。颜色 中的键为 Monaco 编辑器颜色 ID（如 editor.background），保持英文。
+        </p>
+        <ElInput
+          v-model="highlightText"
+          type="textarea"
+          :rows="18"
+          resize="vertical"
+          spellcheck="false"
+          placeholder="请输入高亮 JSON 配置"
+        />
+        <div v-if="highlightError" class="highlight-error">{{ highlightError }}</div>
+      </div>
+      <template #footer>
+        <ElButton @click="resetHighlightConfig">恢复默认</ElButton>
+        <ElButton @click="highlightVisible = false">取消</ElButton>
+        <ElButton type="primary" @click="saveHighlightConfig">保存</ElButton>
+      </template>
+    </ElDialog>
+
     <!-- 词库内容 + 变量 -->
-    <div class="panel-card">
-      <div class="card-title-row">
-        <h3 class="card-title">词库内容</h3>
+      <div class="content-actions-row">
         <div class="content-actions">
           <span v-if="contentDirty" class="dirty-tip">内容已修改，运行前将自动保存</span>
           <ElButton
@@ -1534,14 +1884,6 @@ onBeforeUnmount(() => {
           >
             下一步
           </ElButton>
-          <ElButton
-            type="primary"
-            :icon="VideoPlay"
-            :loading="running"
-            @click="runDic"
-          >
-            运行词库
-          </ElButton>
           <!-- 实时保存开启时由编辑自动写盘，隐藏手动保存按钮 -->
           <ElButton
             v-if="!autoSave"
@@ -1552,6 +1894,37 @@ onBeforeUnmount(() => {
           >
             保存词库
           </ElButton>
+          <ElButton
+            class="run-btn"
+            type="primary"
+            :icon="VideoPlay"
+            :loading="running"
+            @click="runDic"
+          >
+            运行词库
+          </ElButton>
+        </div>
+      </div>
+
+      <!-- 多开标签栏：多标签切换编辑词库文件 -->
+      <div class="dic-tabs">
+        <div
+          v-for="tab in openTabs"
+          :key="tab.path"
+          class="dic-tab"
+          :class="{ active: tab.path === dicForm.path.trim() }"
+          :title="tab.path"
+          @click="switchTab(tab.path)"
+        >
+          <span class="dic-tab-name">{{ tabLabel(tab.path) }}</span>
+          <span v-if="tab.dirty" class="dic-tab-dirty" title="有未保存的修改" />
+          <el-icon class="dic-tab-close" @click.stop="closeTab(tab.path)">
+            <Close />
+          </el-icon>
+        </div>
+        <div class="dic-tab-add" @click="openFileVisible = true">
+          <el-icon><Plus /></el-icon>
+          <span>打开</span>
         </div>
       </div>
       <div class="editor-vars-layout">
@@ -1572,25 +1945,31 @@ onBeforeUnmount(() => {
           <div ref="varsBodyEl" class="vars-panel-body">
             <div class="vars-col">
               <div class="vars-col-title">局部变量</div>
-              <div v-if="Object.keys(result?.vars?.P || {}).length" class="vars-box">
+              <div v-if="varRowsP.length" class="vars-box">
                 <div
-                  v-for="(val, key) in result.vars.P"
-                  :key="'P:' + key"
+                  v-for="row in varRowsP"
+                  :key="row.id"
                   class="var-row"
+                  :style="{ paddingLeft: 12 + row.depth * 14 + 'px' }"
                 >
-                  <span class="var-key">{{ key }}</span>
-                  <ElTag class="var-type" size="small" type="info">{{ val.t || '未知' }}</ElTag>
+                  <span
+                    v-if="row.hasChildren"
+                    class="var-arrow"
+                    @click="toggleClass(row.id)"
+                  >{{ row.collapsed ? '▶' : '▼' }}</span>
+                  <span class="var-key">{{ row.key }}</span>
+                  <ElTag class="var-type" size="small" type="info">{{ row.val.t || '未知' }}</ElTag>
                   <div class="var-val-wrap">
-                    <span class="var-val">{{ displayVarVal('P', key, val) }}</span>
+                    <span class="var-val">{{ displayVarVal(row.id, row.val) }}</span>
                     <ElButton
-                      v-if="isVarLong(val)"
+                      v-if="isVarLong(row.val)"
                       class="var-toggle"
                       link
                       type="primary"
                       size="small"
-                      @click="toggleVar('P', key)"
+                      @click="toggleVar(row.id)"
                     >
-                      {{ isVarExpanded('P', key) ? '收起' : '展开' }}
+                      {{ isVarExpanded(row.id) ? '收起' : '展开' }}
                     </ElButton>
                   </div>
                 </div>
@@ -1601,25 +1980,31 @@ onBeforeUnmount(() => {
             </div>
             <div class="vars-col">
               <div class="vars-col-title">全局变量</div>
-              <div v-if="Object.keys(result?.vars?.G || {}).length" class="vars-box">
+              <div v-if="varRowsG.length" class="vars-box">
                 <div
-                  v-for="(val, key) in result.vars.G"
-                  :key="'G:' + key"
+                  v-for="row in varRowsG"
+                  :key="row.id"
                   class="var-row"
+                  :style="{ paddingLeft: 12 + row.depth * 14 + 'px' }"
                 >
-                  <span class="var-key">{{ key }}</span>
-                  <ElTag class="var-type" size="small" type="info">{{ val.t || '未知' }}</ElTag>
+                  <span
+                    v-if="row.hasChildren"
+                    class="var-arrow"
+                    @click="toggleClass(row.id)"
+                  >{{ row.collapsed ? '▶' : '▼' }}</span>
+                  <span class="var-key">{{ row.key }}</span>
+                  <ElTag class="var-type" size="small" type="info">{{ row.val.t || '未知' }}</ElTag>
                   <div class="var-val-wrap">
-                    <span class="var-val">{{ displayVarVal('G', key, val) }}</span>
+                    <span class="var-val">{{ displayVarVal(row.id, row.val) }}</span>
                     <ElButton
-                      v-if="isVarLong(val)"
+                      v-if="isVarLong(row.val)"
                       class="var-toggle"
                       link
                       type="primary"
                       size="small"
-                      @click="toggleVar('G', key)"
+                      @click="toggleVar(row.id)"
                     >
-                      {{ isVarExpanded('G', key) ? '收起' : '展开' }}
+                      {{ isVarExpanded(row.id) ? '收起' : '展开' }}
                     </ElButton>
                   </div>
                 </div>
@@ -1632,9 +2017,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="form-hint">
-        支持词库语法实时编辑：修改后点击「运行词库」或「保存词库」即可生效，无需重启服务（Ctrl+S 保存）
+        支持词库语法实时编辑：修改后点击「运行词库」或「保存词库」即可生效，无需重启服务
       </div>
-    </div>
+      <div class="shortcut-hints">
+        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</span>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Z</kbd> 上一步</span>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Y</kbd> 下一步</span>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Space</kbd> 补全</span>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>/</kbd> 注释</span>
+      </div>
 
     <!-- 运行输出 -->
     <div class="output-zone">
@@ -1764,6 +2155,12 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .page-title {
   margin: 0 0 4px;
   font-size: 22px;
@@ -1776,6 +2173,24 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 14px;
   color: var(--el-text-color-secondary);
+}
+
+.highlight-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.highlight-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.highlight-error {
+  font-size: 13px;
+  color: var(--el-color-danger);
 }
 
 .panel-card {
@@ -1792,14 +2207,92 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
-.card-title {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+/* ==================== 多开标签栏 ==================== */
+.dic-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  margin-bottom: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-.card-title-row {
+.dic-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 220px;
+  padding: 5px 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--el-fill-color-light);
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.dic-tab:hover {
+  background: var(--el-fill-color);
+}
+
+.dic-tab.active {
+  background: var(--el-bg-color);
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.dic-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dic-tab-dirty {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-warning);
+}
+
+.dic-tab-close {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  border-radius: 4px;
+}
+
+.dic-tab-close:hover {
+  color: var(--el-color-danger);
+  background: var(--el-fill-color-darker);
+}
+
+.dic-tab-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px 8px 0 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.dic-tab-add:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.content-actions-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1807,14 +2300,16 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
 }
 
-.card-title-row .card-title {
-  margin-bottom: 0;
-}
-
 .content-actions {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 运行词库：靠右放置 */
+.content-actions .run-btn {
+  margin-left: auto;
 }
 
 .dirty-tip {
@@ -1829,6 +2324,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   overflow: hidden;
+  background: var(--el-bg-color);
 }
 
 .editor-vars-layout {
@@ -1890,17 +2386,6 @@ onBeforeUnmount(() => {
   max-height: none;
 }
 
-.dic-file-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.dic-file-row .path-row {
-  flex: 1;
-}
-
 .auto-run-inline {
   display: flex;
   align-items: center;
@@ -1908,17 +2393,41 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.path-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .form-hint {
   margin-top: 4px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.shortcut-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.shortcut-hint kbd {
+  display: inline-block;
+  min-width: 14px;
+  padding: 1px 5px;
+  border: 1px solid var(--el-border-color);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--el-text-color-regular);
 }
 
 .g-tag-wrap {
@@ -2127,6 +2636,18 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+/* 类对象成员折叠箭头 */
+.var-arrow {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  user-select: none;
+}
+
 .var-type {
   flex-shrink: 0;
   margin-top: 1px;
@@ -2180,17 +2701,11 @@ onBeforeUnmount(() => {
     min-height: 300px;
   }
 
-  .dic-file-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
   .auto-run-inline {
     justify-content: flex-end;
   }
 
-  .card-title-row {
+  .content-actions-row {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -2211,6 +2726,11 @@ onBeforeUnmount(() => {
   .dirty-tip {
     grid-column: 1 / -1;
   }
+
+  /* 手机端隐藏快捷键说明 */
+  .shortcut-hints {
+    display: none;
+  }
 }
 
 @media (max-width: 480px) {
@@ -2229,8 +2749,12 @@ onBeforeUnmount(() => {
     gap: 10px;
   }
 
-  .page-header-flex > .el-button {
+  .page-header-actions {
     width: 100%;
+  }
+
+  .page-header-actions .el-button {
+    flex: 1;
     margin-left: 0;
   }
 
