@@ -50,7 +50,7 @@ const key = ref('')
 const rememberMe = ref(false)
 const logging = ref(false)
 const error = ref('')
-const autoLogin = ref(true)
+const autoLogin = ref(false)
 const keyInput = ref(null)
 const connectionError = ref(false)
 
@@ -63,7 +63,7 @@ const offWsStatus = onWsStatusChange((v) => {
 // 点击状态点：编辑 WS 连接地址
 function editWsAddress() {
   ElMessageBox.prompt(
-    '编辑 WS 连接地址：可填完整地址（如 ws://127.0.0.1:8080/nebula）或路径（如 /nebula/ws），未以 /ws 结尾会自动补全。',
+    '编辑 WS 连接地址：可填完整地址（如 ws://127.0.0.1:8080/nebula）或路径（如 /nebula）。',
     'WS 连接地址',
     {
       confirmButtonText: '保存并重连',
@@ -116,14 +116,8 @@ async function doLogin(k) {
 }
 
 onMounted(async () => {
-  const urlKey = new URLSearchParams(location.search).get('key')
-  if (urlKey) {
-    await doLogin(urlKey)
-  } else {
-    autoLogin.value = false
-    await nextTick()
-    keyInput.value?.focus()
-  }
+  await nextTick()
+  keyInput.value?.focus()
 })
 
 onUnmounted(() => {

@@ -10,6 +10,18 @@ import Login from '@/views/Login.vue'
 import { apiPost, onPush, disconnect, onUnauthorized, onWsAddressRequired, getStoredWsAddress, saveWsAddress, DEFAULT_WS_ADDRESS } from '@/api.js'
 import { clearDocCache } from '@/docCache.js'
 
+/* ================= URL 参数注入 ================= */
+// 支持通过 GET 参数一键注入 WS 地址与登录密码：?ws=ws://host:port/nebula&key=密钥
+const urlParams = new URLSearchParams(window.location.search)
+const urlWs = urlParams.get('ws')
+if (urlWs) {
+  saveWsAddress(urlWs)
+}
+const urlKey = urlParams.get('key')
+if (urlKey) {
+  localStorage.setItem('nebula_opui_key', urlKey)
+}
+
 /* ================= 主题 ================= */
 const isDarkMode = ref(true)
 
@@ -42,7 +54,7 @@ onUnauthorized(() => {
 // 特殊域名下 WS 连接失败：要求手动填写 WS 地址（反向代理域名无法转发 WS 时，可直连局域网服务器）
 onWsAddressRequired(() => {
   ElMessageBox.prompt(
-    '当前域名无法建立 WebSocket 连接，请填写可用的 WS 地址：完整地址（如 ws://127.0.0.1:8080/nebula/ws，用于直连局域网服务器）或路径（如 /nebula/ws）。',
+    '当前域名无法建立 WebSocket 连接，请填写可用的 WS 地址：完整地址（如 ws://127.0.0.1:8080/nebula，用于直连局域网服务器）或路径（如 /nebula）。',
     'WS 连接配置',
     {
       confirmButtonText: '保存并重试',
@@ -50,7 +62,7 @@ onWsAddressRequired(() => {
       closeOnClickModal: false,
       closeOnPressEscape: false,
       inputValue: getStoredWsAddress() || DEFAULT_WS_ADDRESS,
-      inputPlaceholder: '例如 ws://127.0.0.1:8080/nebula/ws 或 /nebula/ws',
+      inputPlaceholder: '例如 ws://127.0.0.1:8080/nebula 或 /nebula',
       inputValidator: (v) => {
         const p = (v || '').trim()
         if (p.startsWith('/')) return true

@@ -35,12 +35,8 @@ export function getStoredWsAddress() {
 
 // 保存/清除自定义 WS 地址（保存后重置提示标记，允许重新校验）
 export function saveWsAddress(address) {
-  let p = (address || '').trim().replace(/\/+$/, '')
+  const p = (address || '').trim().replace(/\/+$/, '')
   if (p) {
-    // 服务端 WS 固定挂载在访问路径下的 /ws，地址未以 /ws 结尾时自动补全
-    if (!/\/ws$/i.test(p)) {
-      p += '/ws'
-    }
     localStorage.setItem(WS_ADDRESS_STORAGE_KEY, p)
   } else {
     localStorage.removeItem(WS_ADDRESS_STORAGE_KEY)
@@ -48,17 +44,30 @@ export function saveWsAddress(address) {
   wsAddressPrompted = false
 }
 
-// 默认 WS 连接地址（本地开发/局域网直连场景，保存时自动补全 /ws）
-export const DEFAULT_WS_ADDRESS = 'ws://127.0.0.1:8080/nebula'
+// 默认 WS 连接地址（本地开发/局域网直连场景，直接使用访问路径）
+export const DEFAULT_WS_ADDRESS = 'ws://localhost:8080/nebula'
 
-// WS 连接状态（是否已建立连接）
-let wsStatusHandler = null
+// WS 连接状态（是否已建立连接）：监听器集合，支持多个组件订阅 + 取消订阅
+const wsStatusListeners = new Set()
 export function getWsConnected() {
   return !!(ws && ws.readyState === WebSocket.OPEN)
 }
 export function onWsStatusChange(fn) {
-  wsStatusHandler = fn
-  if (fn) fn(getWsConnected())
+  if (typeof fn !== 'function') return () => {}
+  wsStatusListeners.add(fn)
+  fn(getWsConnected()) // 注册时立即同步一次当前状态
+  return () => wsStatusListeners.delete(fn) // 返回取消订阅函数
+}
+// 通知所有状态监听器（连接建立/断开/超时/主动关闭等任何状态变化后调用）
+function notifyWsStatus() {
+  const v = getWsConnected()
+  for (const fn of wsStatusListeners) {
+    try {
+      fn(v)
+    } catch (e) {
+      /* 单个监听器异常不影响其他监听器 */
+    }
+  }
 }
 
 // 当前是否处于需要手动填写 WS 地址的域名
@@ -85,33 +94,22 @@ function getKey() {
   return localStorage.getItem('nebula_opui_key') || sessionStorage.getItem('nebula_opui_key') || ''
 }
 
-// 访问路径基础地址（协议 + host + 访问路径，不含末尾斜杠）
-// 生产环境同源部署：通过页面访问路径推导，天然适配自定义域名/反向代理/访问路径变更；
-// 仅开发环境（Vite dev server 与后端不同源）才使用 VITE_API_BASE_URL 配置的完整地址
-function getApiBase() {
-  const isFullUrl = config.apiBaseUrl.startsWith('http://') || config.apiBaseUrl.startsWith('https://')
-  const apiUrl = new URL(isFullUrl ? config.apiBaseUrl : window.location.href)
-  return apiUrl.origin + apiUrl.pathname.replace(/\/+$/, '')
-}
-
 // WS 连接地址：优先使用手动填写的 WS 地址（支持完整 ws://wss:// 地址直连局域网服务器，
-// 或 / 开头的路径拼在当前访问域名下）；否则通过访问路径定义，服务端固定挂载在访问路径下的 /ws
+// 或 / 开头的路径拼到固定 localhost）；否则用配置的 API 基础路径推导（挂在访问路径本身）
 function getWsUrl() {
   const stored = getStoredWsAddress()
   if (stored) {
-    // 完整地址（如 ws://127.0.0.1:8080/nebula/ws）直接使用
+    // 完整地址（如 ws://127.0.0.1:8080/nebula）直接使用
     if (/^wss?:\/\//.test(stored)) {
       return stored
     }
-    // 路径则拼在当前访问域名下
-    const apiUrl = new URL(window.location.href)
-    const wsProto = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-    return wsProto + '//' + apiUrl.host + (stored.startsWith('/') ? stored : '/' + stored)
+    // 路径则拼到固定 localhost（默认后端端口 8080），不用当前访问域名
+    return 'ws://localhost:8080' + (stored.startsWith('/') ? stored : '/' + stored)
   }
-  const isFullUrl = config.apiBaseUrl.startsWith('http://') || config.apiBaseUrl.startsWith('https://')
-  const apiUrl = new URL(isFullUrl ? config.apiBaseUrl : window.location.href)
+  // 相对路径（如 ./nebula/）也正确解析到当前访问域名下
+  const apiUrl = new URL(config.apiBaseUrl, window.location.href)
   const wsProto = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-  return wsProto + '//' + apiUrl.host + apiUrl.pathname.replace(/\/+$/, '') + '/ws'
+  return wsProto + '//' + apiUrl.host + apiUrl.pathname.replace(/\/+$/, '')
 }
 
 function ensureConnected() {
@@ -144,6 +142,8 @@ function doConnect() {
       ws.onerror = null
       ws.close()
       ws = null
+      // 旧连接被替换，同步状态（可能从已连接变为未连接/连接中）
+      notifyWsStatus()
     }
 
     let settled = false
@@ -164,6 +164,8 @@ function doConnect() {
         ws.close()
         ws = null
       }
+      // 连接超时后同步状态，避免状态点停留在上一次的已连接状态
+      notifyWsStatus()
     }, 5000)
 
     try {
@@ -198,7 +200,7 @@ function doConnect() {
       ws.onopen = () => {
         clearTimeout(connectTimer) // 连接已建立，取消连接建立超时
         reconnectCount = 0 // 连接成功，重置重连计数
-        wsStatusHandler?.(getWsConnected())
+        notifyWsStatus()
         // 连接内认证：不在 URL 传密钥，改为连接后发送 check_opui_key 消息验证
         const storedKey = getKey()
         if (storedKey) {
@@ -242,7 +244,7 @@ function doConnect() {
         stopHeartbeat()
         wsAuthenticated = false
         ws = null
-        wsStatusHandler?.(getWsConnected())
+        notifyWsStatus()
         // 拒绝所有等待中的 API 请求
         for (const [id, { reject: rej, timer }] of pendingRequests) {
           clearTimeout(timer)
@@ -297,7 +299,7 @@ function startHeartbeat() {
         ws.onclose = null // 阻止 onclose 再次触发 stopHeartbeat + scheduleReconnect
         ws.close()
         ws = null
-        wsStatusHandler?.(getWsConnected())
+        notifyWsStatus()
       }
       wsAuthenticated = false
       scheduleReconnect()
@@ -365,33 +367,6 @@ function resendPersistentSends() {
       ws.send(JSON.stringify({ id: String(++msgId), type: data.type, data: data.data || {} }))
     } catch (e) { /* ignore */ }
   }
-}
-
-/**
- * 通过 HTTP fetch 发送 API 请求（短连接，适合高频轮询，不占用 WebSocket）
- */
-export async function apiFetch(data) {
-  const key = getKey()
-  const resp = await fetch(getApiBase() + '/api', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(key ? { 'X-OPUI-Key': key } : {}),
-    },
-    body: JSON.stringify(data),
-  })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(text || `HTTP ${resp.status}`)
-  }
-  const result = await resp.json()
-  if (result && result.status === 'error') {
-    if (result.error === 'unauthorized') {
-      handleUnauthorized()
-    }
-    throw new Error(result.error || 'API error')
-  }
-  return result.data !== undefined ? result.data : result
 }
 
 /**
@@ -465,5 +440,5 @@ export function disconnect() {
     ws.close()
     ws = null
   }
-  wsStatusHandler?.(getWsConnected())
+  notifyWsStatus()
 }

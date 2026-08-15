@@ -83,9 +83,10 @@ onMounted(loadList)
         </ElTableColumn>
         <ElTableColumn label="操作" :width="isMobile ? 90 : 130" align="center">
           <template #default="{ row }">
-            <ElButton type="danger" size="small" link @click="closeWs(row)">
+            <ElButton v-if="row.closable" type="danger" size="small" link @click="closeWs(row)">
               关闭
             </ElButton>
+            <span v-else class="muted">-</span>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -114,6 +115,10 @@ onMounted(loadList)
   margin: 0;
   font-size: 14px;
   color: var(--el-text-color-secondary);
+}
+
+.muted {
+  color: var(--el-text-color-disabled);
 }
 
 .panel-card {

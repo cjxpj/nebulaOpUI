@@ -6,11 +6,17 @@
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
+  "//scripts": {
+    "build:go": "构建为 Go 内嵌资源(使用 vite.config.go.js)",
+    "deploy": "先构建 dist,再通过 wrangler 上传到 Cloudflare Pages 项目 nebulaopui;需环境变量 CLOUDFLARE_API_TOKEN",
+    "format": "用 prettier 格式化 src/ 下的代码"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:go": "vite build --config vite.config.go.js",
     "preview": "vite preview",
+    "deploy": "npm run build && node scripts/deploy.mjs",
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
@@ -25,6 +31,7 @@
     "unplugin-vue-components": "^30.0.0",
     "vite": "^7.3.0",
     "vite-plugin-compression": "^0.5.1",
-    "vite-plugin-vue-devtools": "^8.0.5"
+    "vite-plugin-vue-devtools": "^8.0.5",
+    "wrangler": "^4.123.0"
   }
 }
