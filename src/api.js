@@ -33,14 +33,10 @@ export function getStoredWsAddress() {
   return localStorage.getItem(WS_ADDRESS_STORAGE_KEY) || ''
 }
 
-// 保存/清除自定义 WS 地址（保存后重置提示标记，允许重新校验）
+// 保存自定义 WS 地址（留空则保存默认路径 nebula；保存后重置提示标记，允许重新校验）
 export function saveWsAddress(address) {
   const p = (address || '').trim().replace(/\/+$/, '')
-  if (p) {
-    localStorage.setItem(WS_ADDRESS_STORAGE_KEY, p)
-  } else {
-    localStorage.removeItem(WS_ADDRESS_STORAGE_KEY)
-  }
+  localStorage.setItem(WS_ADDRESS_STORAGE_KEY, p || 'nebula')
   wsAddressPrompted = false
 }
 
@@ -132,6 +128,11 @@ function ensureConnected() {
     () => { if (connectingPromise === p) connectingPromise = null }
   )
   return p
+}
+
+// 主动建立 WS 连接（登录页挂载时调用，让右上角状态点实时反映连接状态）
+export function connectWs() {
+  return ensureConnected()
 }
 
 function doConnect() {

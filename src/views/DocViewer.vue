@@ -15,6 +15,8 @@
             class="search-input"
             @input="onSearch"
             @keydown.enter="jumpToNext"
+            @focus="searchFocused = true"
+            @blur="searchFocused = false"
           >
             <template #suffix v-if="searchText && matchCount > 0">
               <span class="match-nav">
@@ -30,12 +32,13 @@
           </ElInput>
         </div>
         <!-- 搜索结果列表 -->
-        <div v-if="searchText && matchCount > 0" class="search-results">
+        <div v-if="searchText && matchCount > 0 && searchFocused" class="search-results">
           <div
             v-for="(item, idx) in searchResults"
             :key="idx"
             class="search-result-item"
             :class="{ active: idx === currentMatchIdx }"
+            @mousedown.prevent
             @click="jumpTo(idx)"
           >
             <span class="result-num">{{ idx + 1 }}</span>
@@ -92,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { Search, ArrowUp, ArrowDown, List } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
@@ -102,6 +105,7 @@ const docHtml = ref('')
 const loading = ref(true)
 const error = ref('')
 const searchText = ref('')
+const searchFocused = ref(false)
 const matchCount = ref(0)
 const currentMatchIdx = ref(0)
 const contentRef = ref(null)
@@ -201,6 +205,19 @@ function jumpToPrev() {
   const prev = (currentMatchIdx.value - 1 + matchCount.value) % matchCount.value
   jumpTo(prev)
 }
+
+// 清空搜索词时，displayHtml 从高亮版变回原始 HTML，v-html 重建会导致滚动位置归零；
+// 这里在重建前记录滚动位置，重建后恢复，避免“点 X 回到顶部”。
+watch(searchText, (val, oldVal) => {
+  const wasSearching = !!oldVal && oldVal.length >= 2
+  const isCleared = !val || val.length < 2
+  if (!wasSearching || !isCleared) return
+  const el = contentRef.value
+  const top = el ? el.scrollTop : 0
+  nextTick(() => {
+    if (contentRef.value) contentRef.value.scrollTop = top
+  })
+})
 
 /* ================= 加载文档 ================= */
 async function fetchDoc() {

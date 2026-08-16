@@ -238,7 +238,7 @@ onMounted(loadConfig)
                 </ElFormItem>
               </el-col>
               <el-col :xs="24" :sm="12">
-                <ElFormItem label="过滤开头斜杠">
+                <ElFormItem label="过滤空格斜杠">
                   <ElSwitch v-model="inst.filter_slash" size="small" @change="saveInstance(inst, true)" />
                 </ElFormItem>
               </el-col>

@@ -42,7 +42,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { config } from '@/config.js'
-import { apiPost, getWsConnected, onWsStatusChange, getStoredWsAddress, saveWsAddress, DEFAULT_WS_ADDRESS } from '@/api.js'
+import { apiPost, getWsConnected, onWsStatusChange, connectWs, getStoredWsAddress, saveWsAddress, DEFAULT_WS_ADDRESS } from '@/api.js'
 
 const emit = defineEmits(['login-success'])
 
@@ -118,6 +118,8 @@ async function doLogin(k) {
 onMounted(async () => {
   await nextTick()
   keyInput.value?.focus()
+  // 主动建立 WS 连接，让右上角状态点实时反映连接状态（退出登录后重新挂载也会触发）
+  connectWs().catch(() => {})
 })
 
 onUnmounted(() => {

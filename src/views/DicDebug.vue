@@ -21,6 +21,7 @@ import 'monaco-editor/esm/vs/editor/contrib/links/browser/links.js'
 import 'monaco-editor/esm/vs/editor/contrib/multicursor/browser/multicursor.js'
 import 'monaco-editor/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js'
 import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js'
+import 'monaco-editor/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js'
 import 'monaco-editor/esm/vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.js'
 import 'monaco-editor/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js'
 import 'monaco-editor/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js'
@@ -185,11 +186,11 @@ const DIC_CMDS_FLAT = [
   '随机文本', '随机数', '随机大小字母', '随机大写字母', '随机小写字母',
   '随机大小字母数字', '随机小写字母数字', '随机大写字母数字', '随机数字',
   // 变量
-  '线程变量', '临时写', '临时读', '变量', '存在变量', '全局变量', '锁变量', '变量文本',
+  '线程变量', '临时写', '临时读', '变量', '存在变量', '全局变量', '锁变量', '变量文本', '创建字典',
   // 流程控制
   '判断值', '判断空值', '延迟', '捕获输出', '拦截输出', 'STOP', '重启', 'GC回收',
   // 文件操作
-  '读', '写', '写文件', '读文件', '读文件行', '文件后缀', '存在文件', '存在文件夹',
+  '读', '写', '写文件', '读文件', '读文件_随机一行', '读文件_行数', '读文件行', '文件后缀', '存在文件', '存在文件夹',
   '存在文件或文件夹', '删除文件', '删除文件夹', '文件夹列表', '文件列表', '随机文件名',
   '随机文件夹名', '文件夹大小', '文件大小', '重命名', '复制粘贴', '下载文件',
   // 日志
@@ -201,55 +202,65 @@ const DIC_CMDS_FLAT = [
   '分割匹配', '正则替换', '正则匹配', '正则',
   // 加密/解密
   '哈基米加密', '哈基米解密',
+  'AES_CBC加密', 'AES_CBC解密', 'AES_CFB加密', 'AES_CFB解密', 'AES_GCM加密', 'AES_GCM解密', 'AES_CTR加密', 'AES_CTR解密',
   // Ed25519
   'Ed25519种子大小', 'Ed25519生成密钥', 'Ed25519从种子生成密钥', 'Ed25519签名',
   'Ed25519验证签名', 'Ed25519公钥转换为Curve25519', 'Ed25519私钥转换为Curve25519',
   'Ed25519从Curve25519生成密钥',
   // 网络访问
-  '访问', '访问POST', '访问转发',
+  '新建访问', '访问', '访问POST', '访问转发',
+  // 终端
+  '创建终端', '创建Shell终端',
   // 数据库
-  '关闭数据库',
+  '新建mysql', '打开sqlite', '读sqlite', '写sqlite', '关闭数据库',
+  'db_写', 'db_读', 'db_删除', 'db_删除文件', 'db_删除文件夹',
   // JSON
   'JSON解析', 'json解析', 'JSON判断', 'JSON存', 'JSON存字', 'JSON追加', 'JSON追加字',
   'JSON删', 'JSON存在', 'JSON长度', 'JSON美化', 'JSON重名解析',
+  'JSON查找文本', 'JSON模糊查找文本', 'JSON正则查找文本',
   // HTML / Markdown
-  'HTML解析', 'HTML编码', 'HTML解码', 'MD转HTML',
-  // 绘图
-  '绘图', '写图片', '读图片',
+  'HTML解析', 'HTML文本', 'HTML编码', 'HTML解码', 'MD转HTML',
+  // 画布绘图
+  '绘图', '创建画布', '获取画笔颜色', '写图片', '读图片',
   // 其他
-  'GIF拆帧', '图片相似度', '排序', '范围', 'ZIP压缩', 'ZIP解压', '主机',
-  '时间戳格式化时间', '时间间隔', '取前字符', '取后字符',
+  '读配置', '写配置', 'GIF拆帧', '图片相似度', '排序', '范围', 'ZIP压缩', 'ZIP解压',
+  '创建邮件', '主机', '时间戳格式化时间', '时间间隔', '腾讯接口', '取前字符', '取后字符',
   // bot 动态注入
   '获取账号', '搜索账号', '群单发', '群发', '群单发图', '群单发MD', '群单发语音',
   '群单发视频', '私聊', '私聊图', '发送文本', '发送MD', '发送视频', '发送语音', 'IMG', '调用',
   // 词库执行 / WebSocket（dic/registry.go）
   '执行词库', '执行词库文件', '回调', '执行PHP网页词库', '执行PHP网页词库文件',
-  '执行网页词库', '执行网页词库文件', 'WS连接', 'WS断开', 'WS发送', '读词库', '写词库',
+  '执行网页词库', '执行网页词库文件', 'WS连接', 'WS断开', 'WS发送', '创建WS', '读词库', '写词库',
+  '终端_监听执行',
 ]
-
-// 带子命令的词库命令（子命令格式：父命令.子命令）
-const DIC_CMDS_SUB = {
-  字典: ['创建', '设置', '获取'],
-  读文件: ['随机一行', '行数'],
-  AES: ['CBC加密', 'CBC解密', 'CFB加密', 'CFB解密', 'GCM加密', 'GCM解密', 'CTR加密', 'CTR解密'],
-  访问: ['新建', '切换GET', '切换POST', '切换PUT', '切换DELETE', '切换PATCH', '切换HEAD', '切换OPTIONS', '启用跳转', '禁用跳转', '设置头部', '设置超时', 'POST', 'POST文件', '发送', '全部内容', '内容'],
-  终端: ['创建', 'Shell创建', '异步执行', '执行目录', '执行', '等待输入', '解码器', '变量', '断开', '输入', '监听执行'],
-  mysql: ['新建', 'PING', '执行', '切换数据库', '写', '读', '删除文件', '删除文件夹', '关闭'],
-  sqlite: ['打开', '写', '读', '执行', '删除文件', '删除文件夹'],
-  读: ['sqlite'],
-  写: ['sqlite'],
-  db: ['写', '读', '删除', '删除文件', '删除文件夹'],
-  json: ['查找文本', '模糊查找文本', '正则查找文本'],
-  画布: ['创建', '获取', '旋转', '圆形', '灰度', '马赛克'],
-  画笔: ['字体', '大小', '获取颜色', '设置颜色'],
-  绘制: ['文本', '点', '线', '喷漆', '波浪', '油漆桶', '方形', '方形描边', '椭圆', '椭圆描边', '圆形', '圆形描边', '多边形', '多边形描边', '图片', '圆弧', '随机点', '随机线条', '高斯模糊', '马赛克'],
-  邮件: ['创建', '发送', '发送HTML'],
-  腾讯: ['接口', '调用'],
-}
 
 // 无参数命令（插入时不带参数占位）
 const DIC_NO_ARG_CMDS = new Set([
   'STOP', '重启', 'GC回收', '捕获输出', '拦截输出', 'Ed25519种子大小', 'Ed25519生成密钥',
+])
+
+// 对象方法映射：创建函数 -> 方法列表（$变量.方法$，来自各 Class 实例的 Fn）
+// 供输入 $变量. 后按变量类型精确补全
+const DIC_CLASS_METHODS = {
+  '创建WS': ['设置跨域', '设置词库路径', '设置访问路径', '设置变量'],
+  '新建访问': ['切换GET', '切换POST', '切换PUT', '切换DELETE', '切换PATCH', '切换HEAD', '切换OPTIONS', '禁用跳转', '启用跳转', '设置头部', '设置超时', 'POST', 'POST文件', '发送', '全部内容', '内容'],
+  '创建终端': ['异步执行', '执行目录', '执行', '解码器', '变量', '断开', '输入'],
+  '创建Shell终端': ['异步执行', '执行目录', '执行', '解码器', '变量', '断开', '输入'],
+  '新建mysql': ['PING', '执行', '切换数据库', '写', '读', '删除文件', '删除文件夹', '关闭'],
+  '打开sqlite': ['写', '读', '执行', '删除文件', '删除文件夹', '关闭'],
+  '创建邮件': ['发送', '发送HTML'],
+  '腾讯接口': ['调用'],
+  '创建字典': ['设置', '获取'],
+  '创建画布': ['获取', '旋转', '圆角', '灰度', '全图马赛克', '字体', '大小', '设置颜色', '文本', '点', '线', '喷漆', '波浪', '油漆桶', '方形', '方形描边', '椭圆', '椭圆描边', '圆形', '圆形描边', '多边形', '多边形描边', '图片', '圆弧', '随机点', '随机线条', '高斯模糊', '马赛克'],
+}
+
+// 全部对象方法（去重，用于无法推断变量类型时的回退补全）
+const DIC_CLASS_ALL_METHODS = [...new Set(Object.values(DIC_CLASS_METHODS).flat())]
+
+// 无参数对象方法（插入时不带参数占位）
+const DIC_CLASS_NO_ARG_METHODS = new Set([
+  '切换GET', '切换HEAD', '切换OPTIONS', '禁用跳转', '启用跳转', '全部内容', '内容',
+  '异步执行', '断开', 'PING', '关闭', '灰度',
 ])
 
 // 内置变量（来源：dto/value.go 的 Text 内置值）
@@ -289,16 +300,53 @@ const DIC_KEYWORDS = [
   ['"""多行文本"""', '多行文本内容', '"""\n${1:内容}\n"""', 'manual'],
 ]
 
+// 流程控制（> 前缀，对应 entry.go 中 >跳过 / >终止 / >跳行 等解析分支）
+const DIC_FLOW_ITEMS = [
+  ['>否则', '如果块：否则分支'],
+  ['>否则如果:条件', '如果块：否则如果分支', '>否则如果:${1:条件}'],
+  ['>跳过', '跳过当前循环/分支'],
+  ['>终止', '终止整个词库执行'],
+  ['>终止 消息', '终止并输出消息', '>终止 ${1:消息}'],
+  ['>终止循环', '跳出循环>块'],
+  ['>终止遍历', '跳出遍历>块'],
+  ['>跳行(条件)>>偏移', '条件成立时跳转行', '>跳行(${1:条件})>>${2:偏移}'],
+]
+
+// 框声明（> 结尾，对应 entry.go 中 JSON>/文本>/纯文本>/函数>/如果>/遍历>/循环> 等框解析分支）
+const DIC_BOX_ITEMS = [
+  ['JSON>', 'JSON 框声明', 'JSON>${1:内容}'],
+  ['文本>', '文本框声明', '文本>${1:内容}'],
+  ['纯文本>', '纯文本框声明（不解析变量）', '纯文本>${1:内容}'],
+  ['函数>', '函数框声明', '函数>${1:名称}'],
+  ['如果>', '如果框声明', '如果>${1:条件}'],
+  ['遍历>', '遍历框声明', '遍历>${1:变量}'],
+  ['循环>', '循环框声明', '循环>${1:变量}'],
+]
+
 // 构造补全项
-function cmdItem(name) {
-  const noArg = DIC_NO_ARG_CMDS.has(name)
+// noArg：是否无参数命令（省略则回退到本地硬编码 DIC_NO_ARG_CMDS 判断）
+function cmdItem(name, noArg) {
+  const isNoArg = noArg !== undefined ? noArg : DIC_NO_ARG_CMDS.has(name)
   return {
     label: name,
     kind: monaco.languages.CompletionItemKind.Function,
     detail: '词库命令',
     sortText: 'a' + name,
     // 闭合的 $ 直接字面输出（snippet 中结尾裸 $ 视为字面符号，避免 $$ 转义产生多余 $）
-    insertText: noArg ? name + '$' : name + ' ${1:参数}$',
+    insertText: isNoArg ? name + '$' : name + ' ${1:参数}$',
+    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+  }
+}
+
+// 对象方法补全项（$变量.方法$）
+function methodItem(name) {
+  const isNoArg = DIC_CLASS_NO_ARG_METHODS.has(name)
+  return {
+    label: name,
+    kind: monaco.languages.CompletionItemKind.Method,
+    detail: '对象方法',
+    sortText: 'a' + name,
+    insertText: isNoArg ? name + '$' : name + ' ${1:参数}$',
     insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
   }
 }
@@ -357,7 +405,7 @@ function scanDicVars(text) {
   return set
 }
 
-// 判断光标前的触发字符（$ 命令、% 变量、# 段、[ 前缀）
+// 判断光标前的触发字符（$ 命令、% 变量、# 段、[ 前缀、> 流程/框）
 function detectTrigger(model, position) {
   const line = model.getLineContent(position.lineNumber)
   const before = line.slice(0, position.column - 1)
@@ -367,10 +415,33 @@ function detectTrigger(model, position) {
     if (ch === '%') return 'var'
     if (ch === '#') return 'kw'
     if (ch === '[') return 'prefix'
+    if (ch === '>') return 'flow'
     // 遇到空格/制表符说明进入参数区，不再向前匹配
     if (ch === ' ' || ch === '\t') break
   }
   return 'all'
+}
+
+// 判断光标前是否为 $变量. 形式（对象方法调用），是则返回变量名，否则返回 null
+function detectClassMethodTrigger(model, position) {
+  const line = model.getLineContent(position.lineNumber)
+  const before = line.slice(0, position.column - 1)
+  const m = before.match(/\$([^\s$%#\[.]+)\.$/)
+  return m ? m[1] : null
+}
+
+// 扫描全文，推断「变量 -> 创建函数」映射（识别 变量:...$创建函数 形式）
+function buildClassVarMap(model) {
+  const map = new Map()
+  const text = model.getValue()
+  const re = /([A-Za-z0-9_\u4e00-\u9fa5]+)\s*:\s*\$([^\s$%]+)/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    if (DIC_CLASS_METHODS[m[2]]) {
+      map.set(m[1], m[2])
+    }
+  }
+  return map
 }
 
 // 计算补全的替换范围：仅 [ 前缀与 # 段这类「插入文本以触发字符开头」的补全，
@@ -394,16 +465,60 @@ function getReplaceRange(model, position, trigger) {
   return new monaco.Range(position.lineNumber, start + 1, position.lineNumber, position.column)
 }
 
-// 注册词库补全：$ 命令、% 变量、# 段标记、[ 前缀标记；Ctrl+Space 显示全部
+// 计算 > 触发补全的替换范围：覆盖从本 token 起点到光标。
+// > 既作前缀（流程控制 >终止）也作后缀（框声明 JSON>），统一替换整个 token
+// 可避免补全后残留重复的 > 或框关键字（如 >>终止、JSONJSON>）。
+function getFlowReplaceRange(model, position) {
+  const line = model.getLineContent(position.lineNumber)
+  const before = line.slice(0, position.column - 1)
+  let tokenStart = 0
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (before[i] === ' ' || before[i] === '\t') {
+      tokenStart = i + 1
+      break
+    }
+  }
+  return new monaco.Range(position.lineNumber, tokenStart + 1, position.lineNumber, position.column)
+}
+
+// 从后端实时拉取的已注册函数列表；加载成功则优先使用，失败时回退到上面的硬编码列表
+const dicFuncs = ref([])
+
+async function loadDicFuncs() {
+  try {
+    const data = await apiPost({ type: 'get_dic_funcs' })
+    if (data && Array.isArray(data.cmds)) {
+      dicFuncs.value = data.cmds
+    }
+  } catch (e) {
+    console.warn('读取词库函数列表失败，回退本地补全:', e)
+  }
+}
+
+// 注册词库补全：$ 命令、% 变量、# 段标记、[ 前缀标记、. 对象方法、> 流程/框
 monaco.languages.registerCompletionItemProvider('nebula', {
-  triggerCharacters: ['$', '%', '#', '['],
+  triggerCharacters: ['$', '%', '#', '[', '.', '>'],
   provideCompletionItems(model, position, context) {
+    const triggerChar = context?.triggerCharacter
+    // 对象方法调用：$变量. 后按变量类型精确补全方法
+    const classVarName = detectClassMethodTrigger(model, position)
+    if (classVarName !== null) {
+      const classVarMap = buildClassVarMap(model)
+      const createFn = classVarMap.get(classVarName)
+      const methods = createFn ? DIC_CLASS_METHODS[createFn] || DIC_CLASS_ALL_METHODS : DIC_CLASS_ALL_METHODS
+      return { suggestions: methods.map(methodItem) }
+    }
+    // 其它位置的 . 不触发补全
+    if (triggerChar === '.') {
+      return { suggestions: [] }
+    }
     const isTriggerChar =
       context?.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter
-    // 字符触发时按触发类型过滤候选；手动补全（Ctrl+Space）显示全部
+    // 字符触发时按触发类型过滤候选；非触发字符时显示全部
     const trigger = isTriggerChar ? detectTrigger(model, position) : 'all'
     // 替换范围：仅 [ 前缀、# 段触发时需要覆盖已输入的触发字符
     const insertRange = getReplaceRange(model, position, trigger)
+    const flowRange = trigger === 'flow' ? getFlowReplaceRange(model, position) : undefined
     const text = model.getValue()
     const items = []
 
@@ -411,15 +526,20 @@ monaco.languages.registerCompletionItemProvider('nebula', {
     const showVar = trigger === 'all' || trigger === 'var'
     const showKw = trigger === 'all' || trigger === 'kw'
     const showPrefix = trigger === 'all' || trigger === 'prefix'
+    const showFlow = trigger === 'all' || trigger === 'flow'
 
     // 命令
     if (showCmd) {
-      for (const name of DIC_CMDS_FLAT) {
-        items.push(cmdItem(name))
-      }
-      for (const parent of Object.keys(DIC_CMDS_SUB)) {
-        for (const sub of DIC_CMDS_SUB[parent]) {
-          items.push(cmdItem(parent + '.' + sub))
+      const funcs = dicFuncs.value
+      if (Array.isArray(funcs) && funcs.length) {
+        // 后端实时列表：名称与无参标记均来自注册表
+        for (const f of funcs) {
+          if (f && f.name) items.push(cmdItem(f.name, !!f.no_arg))
+        }
+      } else {
+        // 后端未加载成功时回退本地硬编码列表
+        for (const name of DIC_CMDS_FLAT) {
+          items.push(cmdItem(name))
         }
       }
     }
@@ -430,6 +550,16 @@ monaco.languages.registerCompletionItemProvider('nebula', {
         if (trigger === 'all') items.push(kwItem(name, detail, insert))
         else if (cat === '#' && showKw) items.push(kwItem(name, detail, insert))
         else if (cat === '[' && showPrefix) items.push(kwItem(name, detail, insert))
+      }
+    }
+
+    // 流程控制与框声明（> 触发）
+    if (showFlow) {
+      for (const [name, detail, insert] of DIC_FLOW_ITEMS) {
+        items.push(kwItem(name, detail, insert))
+      }
+      for (const [name, detail, insert] of DIC_BOX_ITEMS) {
+        items.push(kwItem(name, detail, insert))
       }
     }
 
@@ -458,11 +588,122 @@ monaco.languages.registerCompletionItemProvider('nebula', {
     }
 
     // 设置替换范围：覆盖已输入的触发字符与其后内容，避免补全后残留多余符号
-    if (insertRange) {
+    if (flowRange) {
+      for (const item of items) item.range = flowRange
+    } else if (insertRange) {
       for (const item of items) item.range = insertRange
     }
 
     return { suggestions: items }
+  },
+})
+
+/* ================= 虚影文字补全（ghost text / inline suggest） ================= */
+// 收集全部命令候选（后端实时列表优先，失败回退本地硬编码）
+function collectCmdCandidates() {
+  const funcs = dicFuncs.value
+  if (Array.isArray(funcs) && funcs.length) {
+    return funcs.map((f) => ({ name: f.name, noArg: !!f.no_arg }))
+  }
+  const out = []
+  for (const name of DIC_CMDS_FLAT) out.push({ name, noArg: DIC_NO_ARG_CMDS.has(name) })
+  return out
+}
+
+// 判断光标前的虚影补全上下文：触发类型 + 已输入前缀 + 触发字符下标
+function detectInlineContext(model, position) {
+  const line = model.getLineContent(position.lineNumber)
+  const before = line.slice(0, position.column - 1)
+  for (let i = before.length - 1; i >= 0; i--) {
+    const ch = before[i]
+    if (ch === '$') return { type: 'cmd', prefix: before.slice(i + 1), startIdx: i }
+    if (ch === '%') return { type: 'var', prefix: before.slice(i + 1), startIdx: i }
+    if (ch === '#') return { type: 'kw', prefix: before.slice(i + 1), startIdx: i }
+    if (ch === '[') return { type: 'prefix', prefix: before.slice(i + 1), startIdx: i }
+    if (ch === '>') return { type: 'flow', prefix: before.slice(i + 1), startIdx: i }
+    // 遇到空格/制表符说明已进入参数区，不再提示
+    if (ch === ' ' || ch === '\t') break
+  }
+  return null
+}
+
+// 前缀匹配变量名：内置变量 → 词库已使用 → 注入全局变量
+function findVarName(prefix, text) {
+  for (const v of DIC_BUILTIN_VARS) {
+    const name = v[0]
+    const ft = v[3] || name
+    if (name.startsWith(prefix) || ft.startsWith(prefix)) return name
+  }
+  const seen = new Set()
+  for (const name of scanDicVars(text)) {
+    if (!DIC_BUILTIN_VAR_SET.has(name) && name.startsWith(prefix) && !seen.has(name)) {
+      return name
+    }
+  }
+  for (const name of injectedGVars()) {
+    if (!DIC_BUILTIN_VAR_SET.has(name) && name.startsWith(prefix) && !seen.has(name)) {
+      return name
+    }
+  }
+  return null
+}
+
+// 前缀匹配段/前缀标记（# 段、[ 前缀），返回含触发字符的完整名
+function findKeyword(prefix, type) {
+  const cat = type === 'kw' ? '#' : '['
+  for (const [name, , , c] of DIC_KEYWORDS) {
+    if (c === cat && name.startsWith(cat + prefix)) return name
+  }
+  return null
+}
+
+// 前缀匹配流程控制关键字（> 前缀），返回含触发字符的完整名
+function findFlow(prefix) {
+  for (const [name] of DIC_FLOW_ITEMS) {
+    if (name.startsWith('>' + prefix)) return name
+  }
+  return null
+}
+
+// 注册虚影文字补全：输入 $ % [ # > 后按前缀灰字提示，Tab 接受
+monaco.languages.registerInlineCompletionsProvider('nebula', {
+  provideInlineCompletions(model, position) {
+    const ctx = detectInlineContext(model, position)
+    // 需要至少输入一个前缀字符才提示，避免刚打触发符就弹首个候选
+    if (!ctx || !ctx.prefix) return { items: [] }
+
+    const prefix = ctx.prefix
+    // 空 range：从光标处追加 ghost（只补全剩余部分，不覆盖已输入前缀）
+    const range = new monaco.Range(
+      position.lineNumber,
+      position.column,
+      position.lineNumber,
+      position.column
+    )
+
+    let insertText = ''
+    if (ctx.type === 'cmd') {
+      const hit = collectCmdCandidates().find((c) => c.name.startsWith(prefix))
+      if (!hit) return { items: [] }
+      // 无参命令补闭合 $，有参命令补命令名 + 空格（光标停在参数处继续输入）
+      insertText = (hit.noArg ? hit.name + '$' : hit.name + ' ').slice(prefix.length)
+    } else if (ctx.type === 'var') {
+      const name = findVarName(prefix, model.getValue())
+      if (!name) return { items: [] }
+      insertText = (name + '%').slice(prefix.length)
+    } else if (ctx.type === 'flow') {
+      const name = findFlow(prefix)
+      if (!name) return { items: [] }
+      // name 含触发字符，去掉首个字符（>）和已输入前缀，得到剩余补全文本
+      insertText = name.slice(1 + prefix.length)
+    } else {
+      const name = findKeyword(prefix, ctx.type)
+      if (!name) return { items: [] }
+      // name 含触发字符，去掉首个字符（# 或 [）和已输入前缀，得到剩余补全文本
+      insertText = name.slice(1 + prefix.length)
+    }
+
+    return { items: [{ insertText, range }] }
   },
 })
 
@@ -480,51 +721,54 @@ const isDarkMode = inject('isDarkMode')
 /* ================= 默认调试词库 ================= */
 const DEFAULT_DEBUG_DIC = 'private/debug.n'
 
-/* ================= 词库文件搜索（仅输入时模糊查找，只搜当前词库所在目录） ================= */
-const dicFiles = ref([])
-const searchLoading = ref(false)
-let dicSearchTimer = null
-let dicSearchSeq = 0 // 请求序号：丢弃过期响应，防止乱序覆盖
-let dicLastKw = '' // 已搜索过的关键字：相同关键字不重复请求
+/* ================= 词库目录浏览（逐层列出文件夹与 .n 文件） ================= */
+const dicBrowseItems = ref([])
+const dicBrowseLoading = ref(false)
+const dicBrowseDir = ref('private') // 当前浏览目录（相对应用目录）
+const dicBrowsePathInput = ref('private') // 顶部可编辑路径
 
-// 当前词库所在目录（用于限定搜索范围，只扫这一个文件夹）
-function currentDicDir() {
-  const p = (dicForm.value.path || '').trim()
+// 计算父目录：private/a/b -> private/a；private -> ''（应用目录根）
+function parentDicDir(path) {
+  const p = (path || '').trim().replace(/^\/+|\/+$/g, '')
+  if (!p) return ''
   const idx = p.lastIndexOf('/')
-  return idx > 0 ? p.slice(0, idx) : 'private'
+  return idx < 0 ? '' : p.slice(0, idx)
 }
 
-// 输入关键字时向后端模糊搜索当前目录下的 .n 文件
-function searchDicFiles(keyword) {
-  clearTimeout(dicSearchTimer)
-  const kw = (keyword || '').trim()
-  dicSearchTimer = setTimeout(async () => {
-    if (!kw) {
-      // 未输入关键字不加载列表
-      dicSearchSeq++
-      dicLastKw = ''
-      dicFiles.value = []
-      searchLoading.value = false
-      return
-    }
-    if (kw === dicLastKw) return // 相同关键字已搜索过，避免重复请求造成闪烁
-    const seq = ++dicSearchSeq
-    searchLoading.value = true
-    try {
-      const data = await apiPost({
-        type: 'get_dic_list',
-        data: { search: kw, base: currentDicDir(), limit: 200 },
-      })
-      if (seq !== dicSearchSeq) return // 已有更新的搜索请求，丢弃过期结果
-      dicFiles.value = data.files || []
-      dicLastKw = kw
-    } catch (e) {
-      console.warn('搜索词库失败:', e)
-      // 失败时保留旧列表，避免下拉闪烁
-    } finally {
-      if (seq === dicSearchSeq) searchLoading.value = false
-    }
-  }, 300)
+// 读取指定目录下的直接子项（文件夹 + .n 文件）
+async function loadDicDir(path) {
+  const p = (path || '').trim().replace(/^\/+|\/+$/g, '')
+  dicBrowseLoading.value = true
+  try {
+    const data = await apiPost({ type: 'get_dic_list', data: { path: p } })
+    dicBrowseDir.value = p
+    dicBrowsePathInput.value = p
+    dicBrowseItems.value = data.entries || []
+  } catch (e) {
+    console.warn('读取词库目录失败:', e)
+  } finally {
+    dicBrowseLoading.value = false
+  }
+}
+
+// 返回上级目录
+function goDicParent() {
+  loadDicDir(parentDicDir(dicBrowseDir.value))
+}
+
+// 跳转到输入框中的目录
+function jumpDicDir() {
+  loadDicDir(dicBrowsePathInput.value)
+}
+
+// 点击条目：文件夹进入下一级，.n 文件直接打开
+function onDicItemClick(item) {
+  if (item.dir) {
+    loadDicDir(item.path)
+  } else {
+    openTab(item.path)
+    openFileVisible.value = false
+  }
 }
 
 /* ================= 调试表单 ================= */
@@ -837,12 +1081,17 @@ function createEditor() {
     wordWrap: 'on',
     tabSize: 4,
     insertSpaces: false,
+    // 圆角选区会在斜边处额外渲染一个 10px 小蓝块，依赖编辑器背景色做反向圆角裁剪；
+    // 本页编辑器背景为透明，裁剪失效会漏出独立小蓝块，故关闭圆角选区
+    roundedSelection: false,
     renderWhitespace: 'selection',
     scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
     padding: { top: 8, bottom: 8 },
-    // 关闭输入即弹出补全：仅 $ % # [ 触发字符与 Ctrl+Space 手动触发
+    // 关闭输入即弹出补全：仅 $ % # [ 触发字符触发
     quickSuggestions: false,
     suggestOnTriggerCharacters: true,
+    // 开启虚影文字补全（ghost text），Tab 接受
+    inlineSuggest: { enabled: true },
   })
   // 编辑器内容变更同步到 dicContent 并缓存到本地
   editor.onDidChangeModelContent(() => {
@@ -856,12 +1105,11 @@ function createEditor() {
     // 实时保存：开启后编辑停顿自动写盘
     scheduleAutoSave()
   })
+  // 记住光标与滚动位置：变化后防抖保存到本地
+  editor.onDidChangeCursorPosition(() => schedulePersistViewState())
+  editor.onDidScrollChange(() => schedulePersistViewState())
   // Ctrl/Cmd + S 保存词库
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveContent())
-  // Ctrl/Cmd + Space 手动触发补全（显式绑定，避免默认键位失效）
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
-    editor.trigger('keyboard', 'editor.action.triggerSuggest', {})
-  })
   // Ctrl/Cmd + Z / Y（含 Ctrl/Cmd + Shift + Z）走自定义历史的上一步/下一步，
   // 覆盖 monaco 原生 undo/redo，避免两套撤销栈不一致
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => undoContent())
@@ -952,6 +1200,94 @@ function clearContentCache(path) {
   } catch (e) {
     console.warn('清除词库缓存失败:', e)
   }
+}
+
+/* ================= 光标与滚动位置记忆 ================= */
+const VIEW_STATE_DEBOUNCE = 200
+let viewStateTimer = null
+// 上一个激活词库路径：切换标签时用于保存其离开时的编辑位置
+let lastActivePath = ''
+
+function viewStateKey(path) {
+  return 'nebula_dic_debug_view_' + encodeURIComponent(path)
+}
+
+// 读取当前编辑器的光标与滚动位置
+function currentViewState() {
+  if (!editor) return null
+  const pos = editor.getPosition()
+  return {
+    line: pos ? pos.lineNumber : 1,
+    column: pos ? pos.column : 1,
+    scrollTop: editor.getScrollTop() || 0,
+    scrollLeft: editor.getScrollLeft() || 0,
+  }
+}
+
+function persistViewState(path) {
+  const p = (path || '').trim()
+  if (!p) return
+  const s = currentViewState()
+  if (!s) return
+  try {
+    localStorage.setItem(viewStateKey(p), JSON.stringify(s))
+  } catch (e) {
+    console.warn('保存编辑位置失败:', e)
+  }
+}
+
+function getViewState(path) {
+  try {
+    const raw = localStorage.getItem(viewStateKey(path))
+    if (!raw) return null
+    const s = JSON.parse(raw)
+    if (s && typeof s.line === 'number') return s
+  } catch (e) {
+    console.warn('读取编辑位置失败:', e)
+  }
+  return null
+}
+
+function clearViewState(path) {
+  try {
+    localStorage.removeItem(viewStateKey(path))
+  } catch (e) {
+    console.warn('清除编辑位置失败:', e)
+  }
+}
+
+// 光标/滚动变化后防抖保存（避免频繁写 localStorage）
+function schedulePersistViewState() {
+  clearTimeout(viewStateTimer)
+  const path = dicForm.value.path.trim()
+  if (!path) return
+  viewStateTimer = setTimeout(() => {
+    if (path === dicForm.value.path.trim()) persistViewState(path)
+  }, VIEW_STATE_DEBOUNCE)
+}
+
+// 立即保存上一个激活词库的编辑位置（切换标签前调用）
+function flushViewState() {
+  clearTimeout(viewStateTimer)
+  viewStateTimer = null
+  if (lastActivePath) persistViewState(lastActivePath)
+}
+
+// 恢复指定词库的编辑位置（光标 + 滚动）
+function restoreViewState(path) {
+  const s = getViewState(path)
+  if (!s || !editor) return
+  const model = editor.getModel()
+  const lineCount = model ? model.getLineCount() : 0
+  const line = Math.min(Math.max(1, s.line || 1), lineCount || 1)
+  const maxCol = model ? model.getLineMaxColumn(line) : s.column || 1
+  editor.setPosition({ lineNumber: line, column: Math.min(Math.max(1, s.column || 1), maxCol) })
+  // 等编辑器完成一次布局后再恢复滚动，避免初始布局未完成导致滚动失效
+  nextTick(() => {
+    if (!editor) return
+    editor.setScrollTop(s.scrollTop || 0)
+    editor.setScrollLeft(s.scrollLeft || 0)
+  })
 }
 
 /* ================= 词库内容编辑 ================= */
@@ -1083,6 +1419,7 @@ async function handleReset() {
   if (!path) return
   clearContentCache(path)
   clearHistory(path)
+  clearViewState(path)
   contentLoading.value = true
   try {
     const data = await apiPost({ type: 'dic_get_content', data: { path } })
@@ -1108,6 +1445,7 @@ async function loadDicContent(path) {
   const cached = getContentCache(path)
   if (cached !== null) {
     setEditorValue(cached)
+    restoreViewState(path)
     contentDirty.value = true
     initHistory(path, cached)
     ElMessage({
@@ -1123,6 +1461,7 @@ async function loadDicContent(path) {
   try {
     const data = await apiPost({ type: 'dic_get_content', data: { path } })
     setEditorValue(data.content || '')
+    restoreViewState(path)
     initHistory(path, dicContent.value)
   } catch (e) {
     // 文件不存在视为新词库，允许直接编辑
@@ -1213,6 +1552,8 @@ const expandedVars = ref({})
 const collapsedClasses = ref({})
 // 变量区域整个卡片折叠（仅手机端显示折叠功能，默认收起）
 const varsCollapsed = ref(false)
+// 线程变量列折叠（默认展开）
+const threadVarsCollapsed = ref(false)
 // 变量面板内容区 DOM（用于高度动画）
 const varsBodyEl = ref(null)
 
@@ -1250,6 +1591,11 @@ function toggleVarsPanel() {
     el.removeEventListener('transitionend', onEnd)
   }
   el.addEventListener('transitionend', onEnd, { once: true })
+}
+
+// 折叠/展开线程变量列
+function toggleThreadVars() {
+  threadVarsCollapsed.value = !threadVarsCollapsed.value
 }
 
 // 变量值超长折叠：超过 100 字符显示省略并支持展开/收起
@@ -1322,9 +1668,10 @@ function collectVarRows(scope, vars) {
   return rows
 }
 
-// 局部/全局变量可见行（类对象折叠后成员不再显示）
+// 局部/全局/线程变量可见行（类对象折叠后成员不再显示）
 const varRowsP = computed(() => collectVarRows('P', result.value?.vars?.P))
 const varRowsG = computed(() => collectVarRows('G', result.value?.vars?.G))
+const varRowsGV = computed(() => collectVarRows('GV', result.value?.vars?.GV))
 
 // 解析全局变量列表（每项 key=value，# 开头为注释）
 function parseGInput(gVars) {
@@ -1561,7 +1908,8 @@ const outputSegments = computed(() => {
 // 已打开的标签页：{ path, dirty }，dirty 表示存在未保存修改（内容已缓存本地，重新打开可恢复）
 const openTabs = ref([])
 const openFileVisible = ref(false)
-const openFilePath = ref('')
+// 标签栏滚动容器：切换/打开标签时用于把激活标签滚动到可视区域
+const dicTabsEl = ref(null)
 
 function activeTab() {
   const p = dicForm.value.path.trim()
@@ -1584,8 +1932,38 @@ function openTab(path) {
   dicForm.value.path = p
 }
 
+// 记住当前打开的全部标签页与激活标签到后端（下次进入页面时恢复）
+function persistOpenState() {
+  const paths = openTabs.value.map((t) => t.path).filter((p) => p && p.trim())
+  const active = (dicForm.value.path || '').trim()
+  apiPost({ type: 'save_dic_config', data: { path: active, tabs: paths } })
+    .then((res) => {
+      if (!res || res.status !== 'ok') console.warn('记住打开词库失败')
+    })
+    .catch((e) => console.warn('记住打开词库失败:', e))
+}
+
 function switchTab(path) {
   if (dicForm.value.path !== path) dicForm.value.path = path
+}
+
+// 把激活标签横向滚动到可视区域：标签过多溢出时，保证当前标签始终可见
+function scrollActiveTabIntoView() {
+  nextTick(() => {
+    const container = dicTabsEl.value
+    if (!container) return
+    const active = container.querySelector('.dic-tab.active')
+    if (!active) return
+    const c = container.getBoundingClientRect()
+    const a = active.getBoundingClientRect()
+    const margin = 8
+    // 激活标签位于左侧可视区外，向左滚动；位于右侧（或被吸顶「打开」按钮遮挡）则向右滚动
+    if (a.left < c.left) {
+      container.scrollBy({ left: a.left - c.left - margin, behavior: 'smooth' })
+    } else if (a.right > c.right) {
+      container.scrollBy({ left: a.right - c.right + margin, behavior: 'smooth' })
+    }
+  })
 }
 
 // 关闭标签：关闭激活标签时自动切换到相邻标签；有未保存修改时需确认（内容已缓存，重新打开可恢复）
@@ -1594,10 +1972,15 @@ function closeTab(path) {
   if (idx < 0) return
   const tab = openTabs.value[idx]
   const doClose = () => {
+    const wasActive = dicForm.value.path.trim() === path
     openTabs.value.splice(idx, 1)
-    if (dicForm.value.path.trim() === path) {
+    if (wasActive) {
       const next = openTabs.value[Math.min(idx, openTabs.value.length - 1)]
       dicForm.value.path = next ? next.path : ''
+    }
+    // 关闭非激活标签不会触发 path watcher，需显式持久化；全部关闭也需持久化空列表
+    if (!wasActive || !dicForm.value.path.trim()) {
+      persistOpenState()
     }
   }
   if (!tab.dirty) {
@@ -1613,16 +1996,15 @@ function closeTab(path) {
     .catch(() => {})
 }
 
-// 打开词库弹窗确认
-function confirmOpenFile() {
-  const p = openFilePath.value.trim()
-  if (!p) {
-    ElMessage.warning('请选择词库文件')
-    return
-  }
-  openTab(p)
-  openFilePath.value = ''
-  openFileVisible.value = false
+// 打开词库弹窗：默认进入 private 目录开始浏览
+function openFileDialog() {
+  openFileVisible.value = true
+  loadDicDir('private')
+}
+
+// 关闭弹窗时清空浏览状态
+function onOpenFileClosed() {
+  dicBrowseItems.value = []
 }
 
 // 同步当前激活标签的修改标记
@@ -1637,6 +2019,11 @@ watch(
   (path) => {
     // 归一化路径：去掉首尾空格，避免缓存/历史键与保存路径不一致
     const p = (path || '').trim()
+    // 切换词库前保存上一个词库的光标与滚动位置
+    if (lastActivePath && lastActivePath !== p) {
+      persistViewState(lastActivePath)
+    }
+    lastActivePath = p
     if (p !== path) {
       dicForm.value.path = p
       return
@@ -1647,6 +2034,8 @@ watch(
         openTabs.value.push({ path: p, dirty: false })
       }
       loadDicContent(p)
+      // 记住当前打开的标签页到后端
+      persistOpenState()
       // 同步新标签的修改标记（内容加载可能不改变 contentDirty 值，需手动对齐）
       const tab = openTabs.value.find((t) => t.path === p)
       if (tab) tab.dirty = contentDirty.value
@@ -1654,6 +2043,8 @@ watch(
       result.value = null
       runError.value = ''
       clearErrorHighlight()
+      // 标签过多时把激活标签滚动到可视区域
+      scrollActiveTabIntoView()
     } else {
       // 关闭全部标签：清空编辑器与历史
       setEditorValue('')
@@ -1668,15 +2059,52 @@ watch(
 )
 
 /* ================= 初始化 ================= */
-onMounted(() => {
-  loadConfig()
-  createEditor()
-  // 未打开任何词库时默认打开调试词库；外部传入（文件管理跳转）时优先打开指定词库
+// 恢复初始打开的词库标签：优先恢复后端记住的全部标签，其次外部传入/上次激活文件，最后默认调试词库
+async function restoreInitialFile() {
+  let tabs = []
+  let last = ''
+  try {
+    const data = await apiPost({ type: 'get_dic_config' })
+    if (data && Array.isArray(data.tabs)) {
+      tabs = data.tabs.filter((p) => typeof p === 'string' && p.trim())
+    }
+    last = (data && data.path) || ''
+  } catch (e) {
+    console.warn('读取上次打开词库失败:', e)
+  }
+
+  // 先恢复已保存的全部标签（直接入列，避免逐个 openTab 触发多次加载/持久化）
+  for (const p of tabs) {
+    if (!openTabs.value.some((t) => t.path === p)) {
+      openTabs.value.push({ path: p, dirty: false })
+    }
+  }
+
+  let target = ''
   if (props.initialPath) {
-    openTab(props.initialPath)
+    target = props.initialPath.trim()
+    if (target && !openTabs.value.some((t) => t.path === target)) {
+      openTabs.value.push({ path: target, dirty: false })
+    }
+  } else if (tabs.length) {
+    target = tabs.includes(last) ? last : tabs[tabs.length - 1]
+  } else if (last) {
+    target = last
+  }
+
+  if (target) {
+    // 触发 path watcher 加载内容并持久化
+    dicForm.value.path = target
   } else if (!dicForm.value.path.trim()) {
     openTab(DEFAULT_DEBUG_DIC)
   }
+}
+
+onMounted(() => {
+  loadConfig()
+  loadDicFuncs()
+  createEditor()
+  restoreInitialFile()
   // 触摸图片外区域时隐藏「复制图片」按钮
   document.addEventListener('touchstart', onDocTouchStart, { passive: true })
   // 仅手机端默认折叠变量区域；电脑端保持展开显示
@@ -1691,7 +2119,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('touchstart', onDocTouchStart)
   clearTimeout(historyTimer)
   clearTimeout(autoSaveTimer)
-  clearTimeout(dicSearchTimer)
+  flushViewState()
   editor?.dispose()
   editor = null
 })
@@ -1811,28 +2239,34 @@ onBeforeUnmount(() => {
       title="打开词库"
       :width="isMobile ? '92%' : 480"
       destroy-on-close
-      @closed="openFilePath = ''"
+      @closed="onOpenFileClosed"
     >
-      <ElSelect
-        v-model="openFilePath"
-        filterable
-        remote
-        :remote-method="searchDicFiles"
-        allow-create
-        :loading="searchLoading"
-        placeholder="选择或输入词库路径，输入关键字可搜索过滤"
-        style="width: 100%"
-      >
-        <ElOption
-          v-for="file in dicFiles"
-          :key="file"
-          :label="file"
-          :value="file"
-        />
-      </ElSelect>
+      <div class="open-file-body">
+        <div class="open-file-bar">
+          <ElButton size="small" :disabled="!dicBrowseDir" @click="goDicParent">上级</ElButton>
+          <ElInput
+            v-model="dicBrowsePathInput"
+            placeholder="目录路径，如 private"
+            clearable
+            @keyup.enter="jumpDicDir"
+          />
+        </div>
+        <div v-if="dicBrowseLoading" class="open-file-loading">加载中…</div>
+        <div v-else-if="dicBrowseItems.length" class="open-file-results">
+          <div
+            v-for="item in dicBrowseItems"
+            :key="item.path"
+            class="open-file-item"
+            :class="{ 'is-dir': item.dir }"
+            @click="onDicItemClick(item)"
+          >
+            {{ item.name }}
+          </div>
+        </div>
+        <div v-else class="open-file-empty">空目录</div>
+      </div>
       <template #footer>
         <ElButton @click="openFileVisible = false">取消</ElButton>
-        <ElButton type="primary" @click="confirmOpenFile">打开</ElButton>
       </template>
     </ElDialog>
 
@@ -1907,7 +2341,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 多开标签栏：多标签切换编辑词库文件 -->
-      <div class="dic-tabs">
+      <div ref="dicTabsEl" class="dic-tabs">
         <div
           v-for="tab in openTabs"
           :key="tab.path"
@@ -1922,7 +2356,7 @@ onBeforeUnmount(() => {
             <Close />
           </el-icon>
         </div>
-        <div class="dic-tab-add" @click="openFileVisible = true">
+        <div class="dic-tab-add" @click="openFileDialog">
           <el-icon><Plus /></el-icon>
           <span>打开</span>
         </div>
@@ -2013,6 +2447,46 @@ onBeforeUnmount(() => {
                 <ElEmpty description="暂无全局变量" :image-size="60" />
               </div>
             </div>
+            <div class="vars-col">
+              <div class="vars-col-title vars-col-title-row" @click="toggleThreadVars">
+                <span class="var-arrow">{{ threadVarsCollapsed ? '▶' : '▼' }}</span>
+                <span>线程变量</span>
+              </div>
+              <div v-if="!threadVarsCollapsed">
+                <div v-if="varRowsGV.length" class="vars-box">
+                <div
+                  v-for="row in varRowsGV"
+                  :key="row.id"
+                  class="var-row"
+                  :style="{ paddingLeft: 12 + row.depth * 14 + 'px' }"
+                >
+                  <span
+                    v-if="row.hasChildren"
+                    class="var-arrow"
+                    @click="toggleClass(row.id)"
+                  >{{ row.collapsed ? '▶' : '▼' }}</span>
+                  <span class="var-key">{{ row.key }}</span>
+                  <ElTag class="var-type" size="small" type="info">{{ row.val.t || '未知' }}</ElTag>
+                  <div class="var-val-wrap">
+                    <span class="var-val">{{ displayVarVal(row.id, row.val) }}</span>
+                    <ElButton
+                      v-if="isVarLong(row.val)"
+                      class="var-toggle"
+                      link
+                      type="primary"
+                      size="small"
+                      @click="toggleVar(row.id)"
+                    >
+                      {{ isVarExpanded(row.id) ? '收起' : '展开' }}
+                    </ElButton>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="vars-empty">
+                <ElEmpty description="暂无线程变量" :image-size="60" />
+              </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2023,7 +2497,6 @@ onBeforeUnmount(() => {
         <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</span>
         <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Z</kbd> 上一步</span>
         <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Y</kbd> 下一步</span>
-        <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>Space</kbd> 补全</span>
         <span class="shortcut-hint"><kbd>Ctrl</kbd>+<kbd>/</kbd> 注释</span>
       </div>
 
@@ -2277,9 +2750,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  /* 标签过多时始终贴在右侧可见区，保证「打开」按钮不被滚出视口 */
+  position: sticky;
+  right: 0;
+  z-index: 1;
   padding: 5px 10px;
   border: 1px dashed var(--el-border-color);
   border-radius: 8px 8px 0 0;
+  background: var(--el-bg-color);
   font-size: 13px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
@@ -2290,6 +2768,68 @@ onBeforeUnmount(() => {
 .dic-tab-add:hover {
   color: var(--el-color-primary);
   border-color: var(--el-color-primary-light-5);
+}
+
+/* 打开词库弹窗：目录浏览 */
+.open-file-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.open-file-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.open-file-bar .el-input {
+  flex: 1;
+}
+
+.open-file-loading {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding: 4px 2px;
+}
+
+.open-file-empty {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding: 16px 2px;
+  text-align: center;
+}
+
+.open-file-results {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank);
+}
+
+.open-file-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  word-break: break-all;
+  transition: background-color 0.2s;
+}
+
+.open-file-item.is-dir {
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.open-file-item:last-child {
+  border-bottom: none;
+}
+
+.open-file-item:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary);
 }
 
 .content-actions-row {
@@ -2378,6 +2918,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  /* 不随父级收缩，保持内容完整高度，由外层 .vars-panel 统一滚动查看超长变量 */
+  flex-shrink: 0;
   /* 折叠动画期间裁剪内容；展开结束后高度恢复 auto 不影响显示 */
   overflow: hidden;
 }
@@ -2607,6 +3149,14 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-regular);
+}
+
+.vars-col-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .vars-box {

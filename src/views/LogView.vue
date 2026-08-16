@@ -8,6 +8,8 @@ const autoScroll = ref(true)
 const logBoxEl = ref(null)
 const hasMore = ref(false)
 const loadingMore = ref(false)
+const inputText = ref('')
+const sending = ref(false)
 
 // 每页加载的日志行数
 const PAGE_SIZE = 300
@@ -98,6 +100,24 @@ async function clearLogs() {
   hasMore.value = false
 }
 
+// 发送终端输入：本地回显命令，交给后端执行，输出经 server_log 实时回推
+async function sendInput() {
+  const text = inputText.value.trim()
+  if (!text || sending.value) return
+  logs.value.push({ level: 'Info', line: '> ' + text, command: true })
+  if (autoScroll.value) nextTick(() => scrollToBottom())
+  inputText.value = ''
+  sending.value = true
+  try {
+    await apiPost({ type: 'terminal_input', data: { input: text } }, { noRetry: true })
+  } catch (e) {
+    logs.value.push({ level: 'Error', line: '[终端] 命令发送失败: ' + String(e?.message || e) })
+    if (autoScroll.value) nextTick(() => scrollToBottom())
+  } finally {
+    sending.value = false
+  }
+}
+
 onMounted(async () => {
   alive = true
   // 通知后端本页面正在查看实时终端：仅在此时后端才推送 server_log。
@@ -146,8 +166,19 @@ onBeforeUnmount(() => {
         <div
           v-for="(log, i) in logs"
           :key="i"
-          :class="['log-line', LEVEL_CLASS[log.level] || 'log-info']"
+          :class="['log-line', log.command ? 'log-command' : (LEVEL_CLASS[log.level] || 'log-info')]"
         >{{ log.line }}</div>
+      </div>
+
+      <div class="log-input">
+        <ElInput
+          v-model="inputText"
+          class="log-input-field"
+          placeholder="输入命令，回车执行"
+          :disabled="sending"
+          @keyup.enter="sendInput"
+        />
+        <ElButton size="small" type="primary" :loading="sending" @click="sendInput">执行</ElButton>
       </div>
     </div>
   </div>
@@ -265,6 +296,20 @@ onBeforeUnmount(() => {
   padding-top: 40px;
   text-align: center;
   color: #8b949e;
+}
+
+.log-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.log-input-field {
+  flex: 1;
+}
+
+.log-command {
+  color: #58a6ff;
 }
 
 @media (max-width: 768px) {

@@ -48,12 +48,7 @@
           :show-text="false"
           color="#a855f7"
         />
-        <div class="load-bars">
-          <span class="load-item">CPU {{ percentText(cpu.percent) }}</span>
-          <span class="load-item">内存 {{ percentText(mem.percent) }}</span>
-          <span class="load-item">IO {{ percentText(diskIo.percent) }}</span>
-        </div>
-        <div class="stat-detail">CPU 50% · 内存 30% · IO 20%</div>
+        <div class="stat-detail">权重：CPU 50% · 内存 30% · IO 20%</div>
       </div>
 
       <!-- CPU -->
@@ -114,11 +109,16 @@
     <!-- 主机信息 -->
     <div class="panel-card">
       <h3 class="card-title">主机信息</h3>
-      <ElDescriptions :column="isMobile ? 1 : 4" border :size="isMobile ? 'small' : 'default'">
+      <ElDescriptions :column="isMobile ? 1 : 3" border :size="isMobile ? 'small' : 'default'">
         <ElDescriptionsItem label="主机名">{{ host.hostname || '-' }}</ElDescriptionsItem>
-        <ElDescriptionsItem label="操作系统">{{ host.platform || host.os || '-' }}</ElDescriptionsItem>
-        <ElDescriptionsItem label="运行时间">{{ fmtUptime(host.uptime) }}</ElDescriptionsItem>
         <ElDescriptionsItem label="架构">{{ host.arch || '-' }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="操作系统">{{ host.platform || host.os || '-' }}</ElDescriptionsItem>
+      </ElDescriptions>
+      <ElDescriptions :column="isMobile ? 1 : 2" border :size="isMobile ? 'small' : 'default'" style="margin-top: 12px">
+        <ElDescriptionsItem label="星云运行时间">
+          <span class="run-time-value">{{ fmtRunTime(runTime) }}</span>
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="系统正常运行时间">{{ fmtUptime(host.uptime) }}</ElDescriptionsItem>
       </ElDescriptions>
     </div>
 
@@ -146,6 +146,7 @@
                 <ElProgress
                   :percentage="Math.min(100, Math.round(row.percent))"
                   :stroke-width="isMobile ? 5 : 8"
+                  :show-text="false"
                   :status="row.percent >= 90 ? 'exception' : row.percent >= 75 ? 'warning' : ''"
                 />
                 <span class="disk-usage-text">{{ percentText(row.percent) }}</span>
@@ -228,6 +229,7 @@ const status = ref({
   overall_load: 0,
   cpu_temp: 0,
   app_mount: '',
+  run_time: 0,
 })
 
 const cpu = computed(() => status.value.cpu)
@@ -235,6 +237,24 @@ const mem = computed(() => status.value.mem)
 const disk = computed(() => status.value.disk)
 const diskIo = computed(() => status.value.disk_io)
 const host = computed(() => status.value.host)
+// 星云运行时间：后端同步基准秒数后本地每秒自增，保证精确到秒实时更新
+const runTime = ref(0)
+let runTimeBase = 0
+let runTimeBaseAt = 0
+let runTimeTimer = null
+
+function tickRunTime() {
+  // 高频监听时后端同步足够快，不本地自增
+  const key = intervalKey.value
+  if (key === 'ultra' || key === 'high') return
+  runTime.value = runTimeBase + Math.floor((Date.now() - runTimeBaseAt) / 1000)
+}
+
+function setRunTime(seconds) {
+  runTimeBase = Math.floor(Number(seconds) || 0)
+  runTimeBaseAt = Date.now()
+  runTime.value = runTimeBase
+}
 const cpuTemp = computed(() => status.value.cpu_temp || 0)
 const appMount = computed(() => status.value.app_mount || '')
 
@@ -276,6 +296,20 @@ function fmtUptime(seconds) {
   return `${m} 分钟`
 }
 
+// 精确到秒的星云运行时间格式化
+function fmtRunTime(seconds) {
+  const n = Math.floor(Number(seconds) || 0)
+  if (n <= 0) return '0 秒'
+  const d = Math.floor(n / 86400)
+  const h = Math.floor((n % 86400) / 3600)
+  const m = Math.floor((n % 3600) / 60)
+  const s = n % 60
+  if (d > 0) return `${d} 天 ${h} 小时 ${m} 分 ${s} 秒`
+  if (h > 0) return `${h} 小时 ${m} 分 ${s} 秒`
+  if (m > 0) return `${m} 分 ${s} 秒`
+  return `${s} 秒`
+}
+
 /* ================= 更新速度（任务管理器式） ================= */
 let timer = null
 // 极高 / 高 / 常规 / 低 对应刷新间隔（毫秒），已暂停 ms=0 停止刷新
@@ -302,6 +336,7 @@ async function loadStatus() {
     if (data && data.cpu) {
       status.value = data
       lastUpdate.value = new Date().toLocaleTimeString()
+      setRunTime(data.run_time)
     }
   } catch (e) {
     console.error('获取系统状态失败:', e)
@@ -341,10 +376,14 @@ function onIntervalCommand(key) {
 onMounted(() => {
   loadStatus()
   startAuto()
+  if (runTimeTimer) clearInterval(runTimeTimer)
+  runTimeTimer = setInterval(tickRunTime, 1000)
 })
 
 onUnmounted(() => {
   stopAuto()
+  if (runTimeTimer) clearInterval(runTimeTimer)
+  runTimeTimer = null
 })
 
 /* ================= 检测更新 ================= */
@@ -396,6 +435,12 @@ async function doOnlineUpdate() {
 <style scoped>
 .page {
   width: 100%;
+}
+
+.run-time-value {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .page-header {
@@ -496,26 +541,6 @@ async function doOnlineUpdate() {
   white-space: nowrap;
 }
 
-/* 负载 */
-.load-bars {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.load-item {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-regular);
-}
-
-.load-item.warn {
-  background: var(--el-color-danger-light-9);
-  color: var(--el-color-danger);
-}
-
 /* ================= 面板卡片 ================= */
 .panel-card {
   margin-bottom: 16px;
@@ -603,15 +628,6 @@ async function doOnlineUpdate() {
     font-size: 11px;
   }
 
-  .load-bars {
-    gap: 4px;
-  }
-
-  .load-item {
-    padding: 1px 6px;
-    font-size: 11px;
-  }
-
   .panel-card {
     padding: 14px 12px;
     border-radius: 8px;
@@ -655,11 +671,6 @@ async function doOnlineUpdate() {
 
   .stat-detail {
     font-size: 10px;
-  }
-
-  .load-item {
-    font-size: 10px;
-    padding: 1px 4px;
   }
 
   .panel-card {

@@ -60,13 +60,22 @@
               <template #title> 实时终端 </template>
             </ElMenuItem>
 
+            <ElMenuItem index="basic-ws">
+              <ElIcon><Link /></ElIcon>
+              <template #title> WebSocket </template>
+            </ElMenuItem>
+
+            <ElMenuItem index="thread-vars">
+              <ElIcon><DataLine /></ElIcon>
+              <template #title> 实时线程变量 </template>
+            </ElMenuItem>
+
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
                 <span>基础配置</span>
               </template>
               <ElMenuItem index="basic-server"> Server </ElMenuItem>
-              <ElMenuItem index="basic-ws"> WebSocket </ElMenuItem>
               <ElMenuItem index="basic-ngrok"> Ngrok </ElMenuItem>
               <ElMenuItem index="basic-frp"> BeerFrp </ElMenuItem>
               <ElMenuItem index="basic-ftp"> FTP </ElMenuItem>
@@ -159,13 +168,22 @@
               <template #title> 实时终端 </template>
             </ElMenuItem>
 
+            <ElMenuItem index="basic-ws">
+              <ElIcon><Link /></ElIcon>
+              <template #title> WebSocket </template>
+            </ElMenuItem>
+
+            <ElMenuItem index="thread-vars">
+              <ElIcon><DataLine /></ElIcon>
+              <template #title> 实时线程变量 </template>
+            </ElMenuItem>
+
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
                 <span>基础配置</span>
               </template>
               <ElMenuItem index="basic-server"> Server </ElMenuItem>
-              <ElMenuItem index="basic-ws"> WebSocket </ElMenuItem>
               <ElMenuItem index="basic-ngrok"> Ngrok </ElMenuItem>
               <ElMenuItem index="basic-frp"> BeerFrp </ElMenuItem>
               <ElMenuItem index="basic-ftp"> FTP </ElMenuItem>
@@ -264,6 +282,8 @@ import {
   Warning,
   Monitor,
   FolderOpened,
+  Link,
+  DataLine,
 } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
@@ -406,6 +426,8 @@ const FileManager = defineAsyncComponent(() => import('@/views/FileManager.vue')
 const SysStatus = defineAsyncComponent(() => import('@/views/SysStatus.vue'))
 // 实时终端
 const LogView = defineAsyncComponent(() => import('@/views/LogView.vue'))
+// 实时线程变量
+const ThreadVars = defineAsyncComponent(() => import('@/views/ThreadVars.vue'))
 // 安全中心
 const SecurityCheck = defineAsyncComponent(() => import('@/views/SecurityCheck.vue'))
 
@@ -413,6 +435,7 @@ const viewMap = {
   'load-page': LoadPage,
   'sys-status': SysStatus,
   'server-log': LogView,
+  'thread-vars': ThreadVars,
   'basic-server': BasicServer,
 	'basic-ws': BasicWS,
 	'basic-ngrok': BasicNgrok,
@@ -478,7 +501,7 @@ function applyPage(page, path) {
 // 侧边栏菜单切换：不携带词库路径，避免残留上一次从文件管理带入的路径
 function switchPage(page) {
   if (!viewMap[page]) {
-    page = DEFAULT_PAGE
+    return // 忽略无效菜单项（如子菜单父级的 index），避免误跳回默认页
   }
   applyPage(page, '')
 }

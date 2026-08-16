@@ -43,7 +43,8 @@ provide('isDarkMode', isDarkMode)
 provide('toggleTheme', toggleTheme)
 
 /* ================= 登录态 ================= */
-const needLogin = ref(true)
+// 有已保存密钥时先假设已登录，避免冷启动/刷新时登录页闪现；校验失败再退回登录页
+const needLogin = ref(!(localStorage.getItem('nebula_opui_key') || sessionStorage.getItem('nebula_opui_key')))
 
 // 注册未认证回调：API 返回 unauthorized 或 WS 重连耗尽时退回登录页
 onUnauthorized(() => {
@@ -123,6 +124,7 @@ onMounted(async () => {
     }
     sessionStorage.removeItem('nebula_opui_key')
     localStorage.removeItem('nebula_opui_key')
+    needLogin.value = true // 已保存密钥失效，退回登录页
   }
 
   // 检查是否配置了密钥
