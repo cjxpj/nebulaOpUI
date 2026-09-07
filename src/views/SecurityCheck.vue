@@ -1,10 +1,6 @@
 <template>
   <div class="page">
-    <div class="page-header">
-      <div class="header-left">
-        <h2 class="page-title">安全中心</h2>
-        <p v-if="!isMobile" class="page-subtitle">登录提示与在线服务监控</p>
-      </div>
+    <div class="page-toolbar">
       <ElButton :icon="Refresh" @click="loadAll" :loading="loading">
         刷新
       </ElButton>
@@ -312,30 +308,12 @@ onUnmounted(() => {
   padding: 4px 8px;
 }
 
-.page-header {
+.page-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 12px;
   gap: 8px;
-}
-
-.header-left {
-  display: flex;
-  flex-direction: column;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 1.4rem;
-  font-weight: 600;
-}
-
-.page-subtitle {
-  margin: 2px 0 0;
-  color: var(--el-text-color-secondary);
-  font-size: 0.85rem;
 }
 
 /* section 卡片 */

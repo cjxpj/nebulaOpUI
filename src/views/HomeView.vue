@@ -45,6 +45,7 @@
         <!-- 桌面端侧边栏 -->
         <aside v-if="!isMobile" class="sidebar">
           <ElMenu
+            ref="menuRef"
             class="menu"
             :collapse="isCollapse"
             :default-active="activePage"
@@ -55,31 +56,31 @@
               <template #title> 系统状态 </template>
             </ElMenuItem>
 
-            <ElMenuItem index="server-log">
-              <ElIcon><Monitor /></ElIcon>
-              <template #title> 实时终端 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="basic-ws">
-              <ElIcon><Link /></ElIcon>
-              <template #title> WebSocket </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="thread-vars">
-              <ElIcon><DataLine /></ElIcon>
-              <template #title> 实时线程变量 </template>
-            </ElMenuItem>
+            <ElSubMenu index="realtime-data">
+              <template #title>
+                <ElIcon><Monitor /></ElIcon>
+                <span>实时数据</span>
+              </template>
+              <ElMenuItem index="rt-terminal"> 实时终端 </ElMenuItem>
+              <ElMenuItem index="rt-ws"> WebSocket </ElMenuItem>
+              <ElMenuItem index="rt-tasks"> 定时任务 </ElMenuItem>
+              <ElMenuItem index="rt-vars"> 线程变量 </ElMenuItem>
+              <ElMenuItem index="rt-security"> 安全中心 </ElMenuItem>
+            </ElSubMenu>
 
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
                 <span>基础配置</span>
               </template>
-              <ElMenuItem index="basic-server"> Server </ElMenuItem>
+              <ElMenuItem index="basic-server"> 服务器 </ElMenuItem>
+              <ElMenuItem index="basic-server-list"> 服务器列表 </ElMenuItem>
               <ElMenuItem index="basic-ngrok"> Ngrok </ElMenuItem>
-              <ElMenuItem index="basic-frp"> BeerFrp </ElMenuItem>
               <ElMenuItem index="basic-ftp"> FTP </ElMenuItem>
               <ElMenuItem index="basic-sftp"> SFTP </ElMenuItem>
+              <ElMenuItem index="basic-cloudtool-server"> 云工具服务端 </ElMenuItem>
+              <ElMenuItem index="cloud-tool"> 云工具 </ElMenuItem>
+              <ElMenuItem index="opui-panel"> 面板配置 </ElMenuItem>
             </ElSubMenu>
 
             <ElSubMenu index="adapter">
@@ -94,24 +95,18 @@
               <ElMenuItem index="adapter-secluded"> Secluded </ElMenuItem>
             </ElSubMenu>
 
-            <ElMenuItem index="opui-panel">
-              <ElIcon><Setting /></ElIcon>
-              <template #title> 面板配置 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="dic-debug">
-              <ElIcon><Cpu /></ElIcon>
-              <template #title> 词库调试 </template>
-            </ElMenuItem>
+            <ElSubMenu index="test">
+              <template #title>
+                <ElIcon><ChatDotRound /></ElIcon>
+                <span>测试</span>
+              </template>
+              <ElMenuItem index="qq-sandbox"> 沙箱测试 </ElMenuItem>
+              <ElMenuItem index="dic-debug"> 词库调试 </ElMenuItem>
+            </ElSubMenu>
 
             <ElMenuItem index="file-manager">
               <ElIcon><FolderOpened /></ElIcon>
               <template #title> 文件管理 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="encrypted-dic">
-              <ElIcon><Document /></ElIcon>
-              <template #title> 加密词库 </template>
             </ElMenuItem>
 
             <ElMenuItem index="extension-deploy">
@@ -119,14 +114,14 @@
               <template #title> 扩展部署 </template>
             </ElMenuItem>
 
-            <ElMenuItem index="security-check">
-              <ElIcon><Warning /></ElIcon>
-              <template #title> 安全中心 </template>
-            </ElMenuItem>
-
             <ElMenuItem index="doc-view">
               <ElIcon><Document /></ElIcon>
               <template #title> 查看文档 </template>
+            </ElMenuItem>
+
+            <ElMenuItem v-if="compileReady" index="compile">
+              <ElIcon><Box /></ElIcon>
+              <template #title> 编译词库 </template>
             </ElMenuItem>
           </ElMenu>
 
@@ -163,31 +158,31 @@
               <template #title> 系统状态 </template>
             </ElMenuItem>
 
-            <ElMenuItem index="server-log">
-              <ElIcon><Monitor /></ElIcon>
-              <template #title> 实时终端 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="basic-ws">
-              <ElIcon><Link /></ElIcon>
-              <template #title> WebSocket </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="thread-vars">
-              <ElIcon><DataLine /></ElIcon>
-              <template #title> 实时线程变量 </template>
-            </ElMenuItem>
+            <ElSubMenu index="realtime-data">
+              <template #title>
+                <ElIcon><Monitor /></ElIcon>
+                <span>实时数据</span>
+              </template>
+              <ElMenuItem index="rt-terminal"> 实时终端 </ElMenuItem>
+              <ElMenuItem index="rt-ws"> WebSocket </ElMenuItem>
+              <ElMenuItem index="rt-tasks"> 定时任务 </ElMenuItem>
+              <ElMenuItem index="rt-vars"> 线程变量 </ElMenuItem>
+              <ElMenuItem index="rt-security"> 安全中心 </ElMenuItem>
+            </ElSubMenu>
 
             <ElSubMenu index="basic">
               <template #title>
                 <ElIcon><Setting /></ElIcon>
                 <span>基础配置</span>
               </template>
-              <ElMenuItem index="basic-server"> Server </ElMenuItem>
+              <ElMenuItem index="basic-server"> 服务器 </ElMenuItem>
+              <ElMenuItem index="basic-server-list"> 服务器列表 </ElMenuItem>
               <ElMenuItem index="basic-ngrok"> Ngrok </ElMenuItem>
-              <ElMenuItem index="basic-frp"> BeerFrp </ElMenuItem>
               <ElMenuItem index="basic-ftp"> FTP </ElMenuItem>
               <ElMenuItem index="basic-sftp"> SFTP </ElMenuItem>
+              <ElMenuItem index="basic-cloudtool-server"> 云工具服务端 </ElMenuItem>
+              <ElMenuItem index="cloud-tool"> 云工具 </ElMenuItem>
+              <ElMenuItem index="opui-panel"> 面板配置 </ElMenuItem>
             </ElSubMenu>
 
             <ElSubMenu index="adapter">
@@ -203,24 +198,18 @@
               <ElMenuItem index="adapter-secluded"> Secluded </ElMenuItem>
             </ElSubMenu>
 
-            <ElMenuItem index="opui-panel">
-              <ElIcon><Setting /></ElIcon>
-              <template #title> 面板配置 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="dic-debug">
-              <ElIcon><Cpu /></ElIcon>
-              <template #title> 词库调试 </template>
-            </ElMenuItem>
+            <ElSubMenu index="test">
+              <template #title>
+                <ElIcon><ChatDotRound /></ElIcon>
+                <span>测试</span>
+              </template>
+              <ElMenuItem index="qq-sandbox"> 沙箱测试 </ElMenuItem>
+              <ElMenuItem index="dic-debug"> 词库调试 </ElMenuItem>
+            </ElSubMenu>
 
             <ElMenuItem index="file-manager">
               <ElIcon><FolderOpened /></ElIcon>
               <template #title> 文件管理 </template>
-            </ElMenuItem>
-
-            <ElMenuItem index="encrypted-dic">
-              <ElIcon><Document /></ElIcon>
-              <template #title> 加密词库 </template>
             </ElMenuItem>
 
             <ElMenuItem index="extension-deploy">
@@ -228,21 +217,21 @@
               <template #title> 扩展部署 </template>
             </ElMenuItem>
 
-            <ElMenuItem index="security-check">
-              <ElIcon><Warning /></ElIcon>
-              <template #title> 安全中心 </template>
-            </ElMenuItem>
-
             <ElMenuItem index="doc-view">
               <ElIcon><Document /></ElIcon>
               <template #title> 查看文档 </template>
+            </ElMenuItem>
+
+            <ElMenuItem v-if="compileReady" index="compile">
+              <ElIcon><Box /></ElIcon>
+              <template #title> 编译词库 </template>
             </ElMenuItem>
           </ElMenu>
         </ElDrawer>
 
         <!-- 内容区 -->
-        <main class="content" id="main-content" :class="{ 'content-mobile': isMobile }">
-          <component :is="currentView" v-bind="viewBindings" />
+        <main class="content" id="main-content" :class="{ 'content-mobile': isMobile, 'content-flush': activePage === 'file-manager' }">
+          <component :is="currentView" />
 
           <ElBacktop target="#main-content" :right="16" :bottom="16">
             <ElIcon><ArrowUpBold /></ElIcon>
@@ -256,14 +245,15 @@
 <script setup>
 import {
   ref,
+  computed,
   onMounted,
   onUnmounted,
   shallowRef,
   inject,
   provide,
+  nextTick,
   defineAsyncComponent,
   watch,
-  computed,
 } from 'vue'
 import {
   Setting,
@@ -277,13 +267,11 @@ import {
   Menu,
   Close,
   SwitchButton,
-  Cpu,
   Odometer,
-  Warning,
   Monitor,
   FolderOpened,
-  Link,
-  DataLine,
+  ChatDotRound,
+  Box,
 } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
@@ -374,6 +362,8 @@ const logout = inject('logout')
 
 /* ================= 布局 ================= */
 const isCollapse = ref(false)
+// 桌面端菜单实例，用于展开「实时数据」子菜单
+const menuRef = ref(null)
 
 /* ================= 移动端适配 ================= */
 const { isMobile } = useMobile()
@@ -382,6 +372,24 @@ const mobileMenuOpen = ref(false)
 function onMobileMenuSelect(page) {
   mobileMenuOpen.value = false
   switchPage(page)
+}
+
+/* ================= 编译环境检测 ================= */
+const compileEnv = ref({ windows: false, go: false })
+const compileReady = computed(() => compileEnv.value.go === true)
+
+async function checkCompileEnv() {
+  try {
+    const data = await apiPost({ type: 'get_compile_env' })
+    if (data) {
+      compileEnv.value = {
+        windows: !!data.windows,
+        go: !!data.go,
+      }
+    }
+  } catch (e) {
+    console.warn('获取编译环境状态失败:', e)
+  }
 }
 
 onMounted(() => {
@@ -397,20 +405,21 @@ onUnmounted(() => {
 import LoadPage from '@/views/Load.vue'
 // 基础配置
 const BasicServer = defineAsyncComponent(() => import('@/views/basic/Server.vue'))
-const BasicWS = defineAsyncComponent(() => import('@/views/basic/WebSocket.vue'))
+const BasicServerList = defineAsyncComponent(() => import('@/views/basic/ServerList.vue'))
 const BasicNgrok = defineAsyncComponent(() => import('@/views/basic/Ngrok.vue'))
-const BasicFrp = defineAsyncComponent(() => import('@/views/basic/Frp.vue'))
 const BasicFtp = defineAsyncComponent(() => import('@/views/basic/Ftp.vue'))
 const BasicSftp = defineAsyncComponent(() => import('@/views/basic/Sftp.vue'))
+const BasicCloudToolServer = defineAsyncComponent(() => import('@/views/basic/CloudToolServer.vue'))
 // 对接配置
 const AdapterQQ = defineAsyncComponent(() => import('@/views/adapter/QQ.vue'))
 const AdapterNapCat = defineAsyncComponent(() => import('@/views/adapter/NapCat.vue'))
 const AdapterYunHu = defineAsyncComponent(() => import('@/views/adapter/YunHu.vue'))
 const AdapterFeiShu = defineAsyncComponent(() => import('@/views/adapter/FeiShu.vue'))
 const AdapterSecluded = defineAsyncComponent(() => import('@/views/adapter/Secluded.vue'))
-
-// 词库商城
-const EncryptedLexicon = defineAsyncComponent(() => import('@/views/EncryptedLexicon.vue'))
+// 沙箱测试（独立导航页）
+const QQSandbox = defineAsyncComponent(() => import('@/views/adapter/QQSandbox.vue'))
+// 词库调试（独立导航页）
+const DicDebug = defineAsyncComponent(() => import('@/views/DicDebug.vue'))
 
 // 扩展部署
 const ExtensionDeploy = defineAsyncComponent(() => import('@/views/ExtensionDeploy.vue'))
@@ -418,44 +427,50 @@ const ExtensionDeploy = defineAsyncComponent(() => import('@/views/ExtensionDepl
 const DocViewer = defineAsyncComponent(() => import('@/views/DocViewer.vue'))
 // OPUI面板
 const OpuiPanel = defineAsyncComponent(() => import('@/views/OpuiPanel.vue'))
-// 词库调试（含 monaco 编辑器，体积最大，进入页面时才加载）
-const DicDebug = defineAsyncComponent(() => import('@/views/DicDebug.vue'))
 // 文件管理
 const FileManager = defineAsyncComponent(() => import('@/views/FileManager.vue'))
 // 系统状态
 const SysStatus = defineAsyncComponent(() => import('@/views/SysStatus.vue'))
-// 实时终端
-const LogView = defineAsyncComponent(() => import('@/views/LogView.vue'))
-// 实时线程变量
-const ThreadVars = defineAsyncComponent(() => import('@/views/ThreadVars.vue'))
-// 安全中心
-const SecurityCheck = defineAsyncComponent(() => import('@/views/SecurityCheck.vue'))
+// 实时数据
+const RtLog = defineAsyncComponent(() => import('@/views/LogView.vue'))
+const RtWebSocket = defineAsyncComponent(() => import('@/views/basic/WebSocket.vue'))
+const RtTasks = defineAsyncComponent(() => import('@/views/ScheduledTasks.vue'))
+const RtVars = defineAsyncComponent(() => import('@/views/ThreadVars.vue'))
+const RtSecurity = defineAsyncComponent(() => import('@/views/SecurityCheck.vue'))
+// 云工具
+const CloudTool = defineAsyncComponent(() => import('@/views/CloudTool.vue'))
+// 编译词库
+const Compile = defineAsyncComponent(() => import('@/views/Compile.vue'))
 
 const viewMap = {
   'load-page': LoadPage,
   'sys-status': SysStatus,
-  'server-log': LogView,
-  'thread-vars': ThreadVars,
+  'rt-terminal': RtLog,
+  'rt-ws': RtWebSocket,
+  'rt-tasks': RtTasks,
+  'rt-vars': RtVars,
+  'rt-security': RtSecurity,
   'basic-server': BasicServer,
-	'basic-ws': BasicWS,
+	'basic-server-list': BasicServerList,
 	'basic-ngrok': BasicNgrok,
-	'basic-frp': BasicFrp,
 	'basic-ftp': BasicFtp,
 	'basic-sftp': BasicSftp,
+	'basic-cloudtool-server': BasicCloudToolServer,
 
 	'adapter-qq': AdapterQQ,
   'adapter-napcat': AdapterNapCat,
   'adapter-yunhu': AdapterYunHu,
   'adapter-feishu': AdapterFeiShu,
   'adapter-secluded': AdapterSecluded,
-
-  'encrypted-dic': EncryptedLexicon,
-  'opui-panel': OpuiPanel,
+  'qq-sandbox': QQSandbox,
   'dic-debug': DicDebug,
+
+  'opui-panel': OpuiPanel,
   'file-manager': FileManager,
   'extension-deploy': ExtensionDeploy,
   'doc-view': DocViewer,
-  'security-check': SecurityCheck,
+  'cloud-tool': CloudTool,
+  'compile': Compile,
 }
 
 const DEFAULT_PAGE = 'sys-status'
@@ -469,60 +484,58 @@ function getPageFromUrl() {
   return new URLSearchParams(location.search).get('page')
 }
 
-function getPathFromUrl() {
-  return new URLSearchParams(location.search).get('path') || ''
-}
-
-function updateUrl(page, path) {
+function updateUrl(page) {
   const url = new URL(location.href)
   url.searchParams.set('page', page)
-  if (path) {
-    url.searchParams.set('path', path)
-  } else {
-    url.searchParams.delete('path')
-  }
   history.replaceState(null, '', url)
 }
 
 /* ================= 页面切换 ================= */
-// 词库调试打开的文件路径（来自 URL，供 DicDebug 作为 initialPath）
-const initialDicPath = ref('')
-
-function applyPage(page, path) {
+function applyPage(page) {
   if (!viewMap[page]) {
     page = DEFAULT_PAGE
   }
+  // 编译环境未安装时，不允许进入「编译词库」页，跳转到「扩展部署」安装词库编译环境
+  if (page === 'compile' && !compileReady.value) {
+    page = 'extension-deploy'
+  }
   activePage.value = page
   currentView.value = viewMap[page]
-  initialDicPath.value = path || ''
-  updateUrl(page, path)
+  updateUrl(page)
 }
 
-// 侧边栏菜单切换：不携带词库路径，避免残留上一次从文件管理带入的路径
+// 侧边栏菜单切换
 function switchPage(page) {
   if (!viewMap[page]) {
     return // 忽略无效菜单项（如子菜单父级的 index），避免误跳回默认页
   }
-  applyPage(page, '')
+  applyPage(page)
 }
 
-// 供子页面（如文件管理）调用：跳转到指定页面并携带词库路径
-function navigateTo(page, path) {
-  applyPage(page, path)
+// 页面所在子菜单分组（打开页面时自动展开对应下拉，支持 URL 直达/跨页跳转）
+const SUBMENU_OF_PAGE = {
+  basic: { match: (p) => p === 'cloud-tool' || p === 'opui-panel' || p.startsWith('basic-'), sub: 'basic' },
+  realtime: { match: (p) => p.startsWith('rt-'), sub: 'realtime-data' },
+  test: { match: (p) => p === 'qq-sandbox' || p === 'dic-debug', sub: 'test' },
 }
+watch(activePage, (page) => {
+  for (const g of Object.values(SUBMENU_OF_PAGE)) {
+    if (g.match(page)) {
+      nextTick(() => menuRef.value?.open?.(g.sub))
+      break
+    }
+  }
+})
 
-provide('navigateTo', navigateTo)
-
-// 仅词库调试页接收 initialPath，其他页面不传属性避免透传到根元素
-const viewBindings = computed(() =>
-  activePage.value === 'dic-debug' ? { initialPath: initialDicPath.value } : {}
-)
+// 供子页面（如 QQ 列表点击「沙箱测试」）跳转到独立导航页
+provide('navigate', switchPage)
 
 /* ================= 初始化 ================= */
-onMounted(() => {
-  // 支持 URL 直达：?page=dic-debug&path=... 时把词库路径带给词库调试
+onMounted(async () => {
+  // 先检测编译环境，再决定是否允许进入「编译词库」页（URL 直达时同样校验）
+  await checkCompileEnv()
   const page = getPageFromUrl() || DEFAULT_PAGE
-  applyPage(page, getPageFromUrl() === 'dic-debug' ? getPathFromUrl() : '')
+  applyPage(page)
 })
 </script>
 
@@ -596,6 +609,11 @@ onMounted(() => {
 /* ==================== 手机端适配 ==================== */
 .content-mobile {
   padding: 12px;
+}
+
+/* 文件管理页需要贴边，去掉内容区内边距 */
+.content-flush {
+  padding: 0;
 }
 
 /* 手机端抽屉菜单 */

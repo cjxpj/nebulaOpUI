@@ -1,711 +1,19 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, inject, h, nextTick } from 'vue'
-import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen, Brush, Close, Plus } from '@element-plus/icons-vue'
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
-// 编辑器核心特性（contrib），不含内置语言与语言服务
-import 'monaco-editor/esm/vs/editor/browser/widget/codeEditor/codeEditorWidget.js'
-import 'monaco-editor/esm/vs/editor/browser/coreCommands.js'
-import 'monaco-editor/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching.js'
-import 'monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard.js'
-import 'monaco-editor/esm/vs/editor/contrib/comment/browser/comment.js'
-import 'monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js'
-import 'monaco-editor/esm/vs/editor/contrib/cursorUndo/browser/cursorUndo.js'
-import 'monaco-editor/esm/vs/editor/contrib/dnd/browser/dnd.js'
-import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController.js'
-import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js'
-import 'monaco-editor/esm/vs/editor/contrib/hover/browser/hoverContribution.js'
-import 'monaco-editor/esm/vs/editor/contrib/indentation/browser/indentation.js'
-import 'monaco-editor/esm/vs/editor/contrib/lineSelection/browser/lineSelection.js'
-import 'monaco-editor/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js'
-import 'monaco-editor/esm/vs/editor/contrib/links/browser/links.js'
-import 'monaco-editor/esm/vs/editor/contrib/multicursor/browser/multicursor.js'
-import 'monaco-editor/esm/vs/editor/contrib/smartSelect/browser/smartSelect.js'
-import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js'
-import 'monaco-editor/esm/vs/editor/contrib/inlineCompletions/browser/inlineCompletions.contribution.js'
-import 'monaco-editor/esm/vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.js'
-import 'monaco-editor/esm/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js'
-import 'monaco-editor/esm/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.js'
-import 'monaco-editor/esm/vs/editor/contrib/wordOperations/browser/wordOperations.js'
-import 'monaco-editor/esm/vs/editor/contrib/wordPartOperations/browser/wordPartOperations.js'
-import 'monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css'
-import 'monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon-modifiers.css'
-// Worker（相对路径导入，绕开 exports 限制）
-import EditorWorker from '../../node_modules/monaco-editor/esm/vs/editor/editor.worker.js?worker'
+import { DocumentChecked, Setting, VideoPlay, ArrowLeftBold, ArrowRightBold, ArrowDown, ArrowUp, FullScreen, Brush, Close, Plus, Warning } from '@element-plus/icons-vue'
+// Monaco 编辑器与 nebula 语言高亮/补全（共享模块，QQ 沙箱测试等页面共用）
+import {
+  monaco,
+  dicHighlight,
+  HIGHLIGHT_CONFIG_KEY,
+  normalizeHighlightConfig,
+  applyHighlightConfig,
+  loadRawHighlightConfig,
+  loadDicFuncs,
+  setInjectedGVars,
+} from '@/monacoNebula.js'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
-// 词库语法高亮自定义配色（JSON 配置）
-import dicHighlight from '@/dicHighlight.json'
-
-/* ================= Monaco Worker 配置 ================= */
-self.MonacoEnvironment = {
-  getWorker() {
-    return new EditorWorker()
-  },
-}
-
-/* ================= 注册词库语言高亮 ================= */
-monaco.languages.register({ id: 'nebula' })
-// 注释语法配置：Ctrl+/ 行注释（多行每行加 //）
-monaco.languages.setLanguageConfiguration('nebula', {
-  comments: {
-    lineComment: '//',
-    blockComment: ['/*', '*/'],
-  },
-})
-// 构建 Monarch 分词器：root 顶部追加自定义正则（优先），其后为内置 tokens 规则
-function buildNebulaTokenizer(customRules, tokens) {
-  const customRoot = (customRules || []).map((r) => [new RegExp(r.regex), r.token])
-  const pairs = ((tokens && tokens.pairs) || []).map((p, i) => ({ state: `pair${i}`, ...p }))
-  const simpleRules = ((tokens && tokens.rules) || []).map((r) => [new RegExp(r.regex), r.token])
-
-  const tokenizer = {
-    root: [
-      ...customRoot,
-      ...pairs.map((p) => [new RegExp(p.open), p.token, `@${p.state}`]),
-      ...simpleRules,
-    ],
-  }
-  for (const p of pairs) {
-    tokenizer[p.state] = [
-      [new RegExp(p.close), p.token, '@pop'],
-      ...p.content.map((c) => [new RegExp(c), p.token]),
-    ]
-  }
-  return { defaultToken: '', tokenizer }
-}
-
-/* ================= 自定义语法高亮主题（JSON 配置） ================= */
-const HIGHLIGHT_CONFIG_KEY = 'nebula_dic_highlight_config'
-const HEX_COLOR_RE = /^#?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/
-
-// 校验并规范化 token 识别规则（正则）
-function normalizeTokens(tokens) {
-  const src = (tokens && typeof tokens === 'object' ? tokens : dicHighlight['分词规则']) || {}
-  const rules = (Array.isArray(src['规则']) ? src['规则'] : []).map((r, i) => {
-    if (!r || typeof r !== 'object' || typeof r['正则'] !== 'string' || !r['正则'] || typeof r['标记'] !== 'string' || !r['标记']) {
-      throw new Error(`分词规则.规则[${i}] 需包含 正则 与 标记`)
-    }
-    try { new RegExp(r['正则']) } catch (e) { throw new Error(`分词规则.规则[${i}].正则 无效: ${e.message}`) }
-    return { regex: r['正则'], token: r['标记'] }
-  })
-  const pairs = (Array.isArray(src['配对']) ? src['配对'] : []).map((p, i) => {
-    if (!p || typeof p !== 'object' || typeof p['开始'] !== 'string' || !p['开始'] || typeof p['结束'] !== 'string' || !p['结束'] || typeof p['标记'] !== 'string' || !p['标记']) {
-      throw new Error(`分词规则.配对[${i}] 需包含 开始、结束、标记`)
-    }
-    try { new RegExp(p['开始']) } catch (e) { throw new Error(`分词规则.配对[${i}].开始 无效: ${e.message}`) }
-    try { new RegExp(p['结束']) } catch (e) { throw new Error(`分词规则.配对[${i}].结束 无效: ${e.message}`) }
-    const content = (Array.isArray(p['内容']) ? p['内容'] : (typeof p['内容'] === 'string' && p['内容'] ? [p['内容']] : []))
-      .map((c) => {
-        if (typeof c !== 'string' || !c) throw new Error(`分词规则.配对[${i}].内容 必须是非空字符串`)
-        try { new RegExp(c) } catch (e) { throw new Error(`分词规则.配对[${i}].内容 无效: ${e.message}`) }
-        return c
-      })
-    if (!content.length) throw new Error(`分词规则.配对[${i}].内容 不能为空`)
-    return { open: p['开始'], close: p['结束'], content, token: p['标记'] }
-  })
-  return { rules, pairs }
-}
-
-// 校验并补齐高亮配置，保证 defineTheme 所需字段齐全（颜色缺失会触发运行时异常）
-// 说明：中文键只存在于配置 JSON 层，normalize 后统一转回 Monaco 所需的英文键（base/inherit/rules/colors/token/foreground）
-function normalizeHighlightConfig(cfg) {
-  if (!cfg || typeof cfg !== 'object' || !cfg['暗色主题'] || !cfg['亮色主题']) {
-    throw new Error('配置必须包含 暗色主题 与 亮色主题 两个主题')
-  }
-  const normalizeTheme = (t, fallbackBase) => ({
-    base: ['vs', 'vs-dark', 'hc-black', 'hc-light'].includes(t?.['基础主题']) ? t['基础主题'] : fallbackBase,
-    inherit: t['继承默认'] !== false,
-    rules: Array.isArray(t['规则']) ? t['规则'].map((r) => ({ token: r['标记'], foreground: r['前景色'] })) : [],
-    colors: t['颜色'] && typeof t['颜色'] === 'object' ? t['颜色'] : {},
-  })
-  const rawCustom = Array.isArray(cfg['自定义规则']) ? cfg['自定义规则'] : []
-  const customRules = rawCustom.map((r, i) => {
-    if (!r || typeof r !== 'object') throw new Error(`自定义规则[${i}] 必须是对象`)
-    if (typeof r['正则'] !== 'string' || !r['正则']) throw new Error(`自定义规则[${i}].正则 不能为空`)
-    if (typeof r['颜色'] !== 'string' || !HEX_COLOR_RE.test(r['颜色'])) {
-      throw new Error(`自定义规则[${i}].颜色 必须是 6 位十六进制色值（如 #FF5500）`)
-    }
-    try {
-      new RegExp(r['正则'])
-    } catch (e) {
-      throw new Error(`自定义规则[${i}].正则 无效: ${e.message}`)
-    }
-    return { token: `custom.${i}`, regex: r['正则'], color: r['颜色'] }
-  })
-  return {
-    dark: normalizeTheme(cfg['暗色主题'], 'vs-dark'),
-    light: normalizeTheme(cfg['亮色主题'], 'vs'),
-    tokens: normalizeTokens(cfg['分词规则'] ?? dicHighlight['分词规则']),
-    customRules,
-  }
-}
-
-function applyHighlightConfig(cfg) {
-  const customColors = (cfg.customRules || []).map((r) => ({ token: r.token, foreground: r.color }))
-  monaco.editor.defineTheme('nebula-dark', { ...cfg.dark, rules: [...cfg.dark.rules, ...customColors] })
-  monaco.editor.defineTheme('nebula-light', { ...cfg.light, rules: [...cfg.light.rules, ...customColors] })
-  monaco.languages.setMonarchTokensProvider('nebula', buildNebulaTokenizer(cfg.customRules || [], cfg.tokens))
-}
-
-// 读取已保存的原始高亮配置（用于弹窗展示），未保存则回退默认 JSON
-function loadRawHighlightConfig() {
-  try {
-    const raw = localStorage.getItem(HIGHLIGHT_CONFIG_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (e) {
-    /* 忽略非法存储 */
-  }
-  return dicHighlight
-}
-
-// 读取并规范化高亮配置，失败时回退默认
-function loadHighlightConfig() {
-  try {
-    return normalizeHighlightConfig(loadRawHighlightConfig())
-  } catch (e) {
-    return normalizeHighlightConfig(dicHighlight)
-  }
-}
-
-// 初始化高亮主题与分词器
-try {
-  applyHighlightConfig(loadHighlightConfig())
-} catch (e) {
-  applyHighlightConfig(normalizeHighlightConfig(dicHighlight))
-}
-
-/* ================= 代码补全（命令/变量/关键字） ================= */
-// 无子命令的词库命令（来源：dic/funcs/registry.go 与 bot 动态注入）
-const DIC_CMDS_FLAT = [
-  // 字符串
-  '文本长度', '长度', '复读', '去除左右', '去除左', '去除右', '字符拼接', '查找字',
-  '取中间', '截取', '替换', '分割', '字符切片', '大写字母', '小写字母', '中文转拼音', '炫酷文字',
-  // 数字
-  '数字格式化', '数字转中文', '四舍五入', '计算',
-  // 随机
-  '随机文本', '随机数', '随机大小字母', '随机大写字母', '随机小写字母',
-  '随机大小字母数字', '随机小写字母数字', '随机大写字母数字', '随机数字',
-  // 变量
-  '线程变量', '临时写', '临时读', '变量', '存在变量', '全局变量', '锁变量', '变量文本', '创建字典',
-  // 流程控制
-  '判断值', '判断空值', '延迟', '捕获输出', '拦截输出', 'STOP', '重启', 'GC回收',
-  // 文件操作
-  '读', '写', '写文件', '读文件', '读文件_随机一行', '读文件_行数', '读文件行', '文件后缀', '存在文件', '存在文件夹',
-  '存在文件或文件夹', '删除文件', '删除文件夹', '文件夹列表', '文件列表', '随机文件名',
-  '随机文件夹名', '文件夹大小', '文件大小', '重命名', '复制粘贴', '下载文件',
-  // 日志
-  '日志', '打印',
-  // 编码/解码
-  '编码', '解码', 'MD5编码', 'B64编码', 'B64解码', 'URL编码', 'URL解码', 'URL链接编码',
-  'URL链接解码', 'sha256', 'Byte生成', 'Byte转String', 'MD转义', 'MIME类型', '加密词库',
-  // 正则
-  '分割匹配', '正则替换', '正则匹配', '正则',
-  // 加密/解密
-  '哈基米加密', '哈基米解密',
-  'AES_CBC加密', 'AES_CBC解密', 'AES_CFB加密', 'AES_CFB解密', 'AES_GCM加密', 'AES_GCM解密', 'AES_CTR加密', 'AES_CTR解密',
-  // Ed25519
-  'Ed25519种子大小', 'Ed25519生成密钥', 'Ed25519从种子生成密钥', 'Ed25519签名',
-  'Ed25519验证签名', 'Ed25519公钥转换为Curve25519', 'Ed25519私钥转换为Curve25519',
-  'Ed25519从Curve25519生成密钥',
-  // 网络访问
-  '新建访问', '访问', '访问POST', '访问转发',
-  // 终端
-  '创建终端', '创建Shell终端',
-  // 数据库
-  '新建mysql', '打开sqlite', '读sqlite', '写sqlite', '关闭数据库',
-  'db_写', 'db_读', 'db_删除', 'db_删除文件', 'db_删除文件夹',
-  // JSON
-  'JSON解析', 'json解析', 'JSON判断', 'JSON存', 'JSON存字', 'JSON追加', 'JSON追加字',
-  'JSON删', 'JSON存在', 'JSON长度', 'JSON美化', 'JSON重名解析',
-  'JSON查找文本', 'JSON模糊查找文本', 'JSON正则查找文本',
-  // HTML / Markdown
-  'HTML解析', 'HTML文本', 'HTML编码', 'HTML解码', 'MD转HTML',
-  // 画布绘图
-  '绘图', '创建画布', '获取画笔颜色', '写图片', '读图片',
-  // 其他
-  '读配置', '写配置', 'GIF拆帧', '图片相似度', '排序', '范围', 'ZIP压缩', 'ZIP解压',
-  '创建邮件', '主机', '时间戳格式化时间', '时间间隔', '腾讯接口', '取前字符', '取后字符',
-  // bot 动态注入
-  '获取账号', '搜索账号', '群单发', '群发', '群单发图', '群单发MD', '群单发语音',
-  '群单发视频', '私聊', '私聊图', '发送文本', '发送MD', '发送视频', '发送语音', 'IMG', '调用',
-  // 词库执行 / WebSocket（dic/registry.go）
-  '执行词库', '执行词库文件', '回调', '执行PHP网页词库', '执行PHP网页词库文件',
-  '执行网页词库', '执行网页词库文件', 'WS连接', 'WS断开', 'WS发送', '创建WS', '读词库', '写词库',
-  '终端_监听执行',
-]
-
-// 无参数命令（插入时不带参数占位）
-const DIC_NO_ARG_CMDS = new Set([
-  'STOP', '重启', 'GC回收', '捕获输出', '拦截输出', 'Ed25519种子大小', 'Ed25519生成密钥',
-])
-
-// 对象方法映射：创建函数 -> 方法列表（$变量.方法$，来自各 Class 实例的 Fn）
-// 供输入 $变量. 后按变量类型精确补全
-const DIC_CLASS_METHODS = {
-  '创建WS': ['设置跨域', '设置词库路径', '设置访问路径', '设置变量'],
-  '新建访问': ['切换GET', '切换POST', '切换PUT', '切换DELETE', '切换PATCH', '切换HEAD', '切换OPTIONS', '禁用跳转', '启用跳转', '设置头部', '设置超时', 'POST', 'POST文件', '发送', '全部内容', '内容'],
-  '创建终端': ['异步执行', '执行目录', '执行', '解码器', '变量', '断开', '输入'],
-  '创建Shell终端': ['异步执行', '执行目录', '执行', '解码器', '变量', '断开', '输入'],
-  '新建mysql': ['PING', '执行', '切换数据库', '写', '读', '删除文件', '删除文件夹', '关闭'],
-  '打开sqlite': ['写', '读', '执行', '删除文件', '删除文件夹', '关闭'],
-  '创建邮件': ['发送', '发送HTML'],
-  '腾讯接口': ['调用'],
-  '创建字典': ['设置', '获取'],
-  '创建画布': ['获取', '旋转', '圆角', '灰度', '全图马赛克', '字体', '大小', '设置颜色', '文本', '点', '线', '喷漆', '波浪', '油漆桶', '方形', '方形描边', '椭圆', '椭圆描边', '圆形', '圆形描边', '多边形', '多边形描边', '图片', '圆弧', '随机点', '随机线条', '高斯模糊', '马赛克'],
-}
-
-// 全部对象方法（去重，用于无法推断变量类型时的回退补全）
-const DIC_CLASS_ALL_METHODS = [...new Set(Object.values(DIC_CLASS_METHODS).flat())]
-
-// 无参数对象方法（插入时不带参数占位）
-const DIC_CLASS_NO_ARG_METHODS = new Set([
-  '切换GET', '切换HEAD', '切换OPTIONS', '禁用跳转', '启用跳转', '全部内容', '内容',
-  '异步执行', '断开', 'PING', '关闭', '灰度',
-])
-
-// 内置变量（来源：dto/value.go 的 Text 内置值）
-const DIC_BUILTIN_VARS = [
-  ['时间', '当前时间'],
-  ['时间戳', '秒级时间戳'],
-  ['毫秒时间戳', '毫秒级时间戳'],
-  ['微秒时间戳', '微秒级时间戳'],
-  ['纳秒时间戳', '纳秒级时间戳'],
-  ['空格', '一个空格'],
-  ['换行', '换行符'],
-  ['系统', '操作系统类型'],
-  ['版本', '程序版本'],
-  ['触发词', '当前触发词'],
-  ['触发', '匹配到的触发内容'],
-  ['括号0', '整个消息（正则整组匹配）'],
-  ['参数0', '整个消息（空格分割第 0 段）'],
-  ['URL编码@变量', '对变量做 URL 编码', 'URL编码@${1:变量}%', 'URL编码'],
-  ['B64编码@变量', '对变量做 Base64 编码', 'B64编码@${1:变量}%', 'B64编码'],
-  ['URL@变量', '对变量做 URL 解码', 'URL@${1:变量}%', 'URL'],
-  ['B64@变量', '对变量做 Base64 解码', 'B64@${1:变量}%', 'B64'],
-  ['TYPE@变量', '获取变量类型', 'TYPE@${1:变量}%', 'TYPE'],
-  ['!变量', '布尔/数值取反', '!${1:变量}%', '!'],
-  ['时间yyyy-MM-dd', '格式化当前时间', '时间${1:yyyy-MM-dd HH:mm:ss}%', '时间'],
-  ['随机数1-100', '区间随机数', '随机数${1:1}-${2:100}%', '随机数'],
-]
-const DIC_BUILTIN_VAR_SET = new Set(DIC_BUILTIN_VARS.map((v) => v[0]))
-
-// 段/关键字（第 4 项为触发类别：# 段标记、[ 前缀标记、manual 仅手动补全时显示）
-const DIC_KEYWORDS = [
-  ['#私聊#', '私聊段前缀（仅私聊消息触发）', '#私聊#', '#'],
-  ['[F]', '函数式触发（插件可调用）', '[F]', '['],
-  ['[L]', '内部触发', '[L]', '['],
-  ['[函数]', '函数声明', '[函数]', '['],
-  ['[类]', '类声明', '[类]', '['],
-  ['±图片地址±', '发送图片', '±${1:图片地址}±', 'manual'],
-  ['"""多行文本"""', '多行文本内容', '"""\n${1:内容}\n"""', 'manual'],
-]
-
-// 流程控制（> 前缀，对应 entry.go 中 >跳过 / >终止 / >跳行 等解析分支）
-const DIC_FLOW_ITEMS = [
-  ['>否则', '如果块：否则分支'],
-  ['>否则如果:条件', '如果块：否则如果分支', '>否则如果:${1:条件}'],
-  ['>跳过', '跳过当前循环/分支'],
-  ['>终止', '终止整个词库执行'],
-  ['>终止 消息', '终止并输出消息', '>终止 ${1:消息}'],
-  ['>终止循环', '跳出循环>块'],
-  ['>终止遍历', '跳出遍历>块'],
-  ['>跳行(条件)>>偏移', '条件成立时跳转行', '>跳行(${1:条件})>>${2:偏移}'],
-]
-
-// 框声明（> 结尾，对应 entry.go 中 JSON>/文本>/纯文本>/函数>/如果>/遍历>/循环> 等框解析分支）
-const DIC_BOX_ITEMS = [
-  ['JSON>', 'JSON 框声明', 'JSON>${1:内容}'],
-  ['文本>', '文本框声明', '文本>${1:内容}'],
-  ['纯文本>', '纯文本框声明（不解析变量）', '纯文本>${1:内容}'],
-  ['函数>', '函数框声明', '函数>${1:名称}'],
-  ['如果>', '如果框声明', '如果>${1:条件}'],
-  ['遍历>', '遍历框声明', '遍历>${1:变量}'],
-  ['循环>', '循环框声明', '循环>${1:变量}'],
-]
-
-// 构造补全项
-// noArg：是否无参数命令（省略则回退到本地硬编码 DIC_NO_ARG_CMDS 判断）
-function cmdItem(name, noArg) {
-  const isNoArg = noArg !== undefined ? noArg : DIC_NO_ARG_CMDS.has(name)
-  return {
-    label: name,
-    kind: monaco.languages.CompletionItemKind.Function,
-    detail: '词库命令',
-    sortText: 'a' + name,
-    // 闭合的 $ 直接字面输出（snippet 中结尾裸 $ 视为字面符号，避免 $$ 转义产生多余 $）
-    insertText: isNoArg ? name + '$' : name + ' ${1:参数}$',
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-  }
-}
-
-// 对象方法补全项（$变量.方法$）
-function methodItem(name) {
-  const isNoArg = DIC_CLASS_NO_ARG_METHODS.has(name)
-  return {
-    label: name,
-    kind: monaco.languages.CompletionItemKind.Method,
-    detail: '对象方法',
-    sortText: 'a' + name,
-    insertText: isNoArg ? name + '$' : name + ' ${1:参数}$',
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-  }
-}
-
-function varItem(name, detail, snippet, filterText) {
-  return {
-    label: name,
-    kind: monaco.languages.CompletionItemKind.Variable,
-    detail: detail || '词库变量',
-    sortText: 'b' + name,
-    // filterText 决定 Monaco 的过滤匹配词（如 label「时间yyyy-MM-dd」按「时间」匹配）
-    filterText: filterText || name,
-    insertText: snippet || name + '%',
-    insertTextRules: snippet
-      ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-      : undefined,
-  }
-}
-
-function kwItem(name, detail, insert) {
-  // 含 $ 占位符的项需作为 snippet 插入，否则 ${...} 会原样输出
-  const isSnippet = !!insert && insert.includes('$')
-  return {
-    label: name,
-    kind: monaco.languages.CompletionItemKind.Keyword,
-    detail: detail || '词库关键字',
-    sortText: 'c' + name,
-    insertText: insert || name,
-    insertTextRules: isSnippet
-      ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-      : undefined,
-  }
-}
-
-// 解析运行配置中注入的全局变量键名（每项 key=value，# 开头为注释）
-function injectedGVars() {
-  const names = []
-  for (const item of dicForm.value.g || []) {
-    const t = String(item).trim()
-    if (!t || t.startsWith('#')) continue
-    const idx = t.indexOf('=')
-    if (idx > 0) names.push(t.slice(0, idx).trim())
-  }
-  return names
-}
-
-// 扫描当前词库内容中出现的 %变量%
-function scanDicVars(text) {
-  const set = new Set()
-  const re = /%([^%\n]+)%/g
-  let m
-  while ((m = re.exec(text))) {
-    const v = m[1].trim()
-    if (v) set.add(v)
-  }
-  return set
-}
-
-// 判断光标前的触发字符（$ 命令、% 变量、# 段、[ 前缀、> 流程/框）
-function detectTrigger(model, position) {
-  const line = model.getLineContent(position.lineNumber)
-  const before = line.slice(0, position.column - 1)
-  for (let i = before.length - 1; i >= 0; i--) {
-    const ch = before[i]
-    if (ch === '$') return 'cmd'
-    if (ch === '%') return 'var'
-    if (ch === '#') return 'kw'
-    if (ch === '[') return 'prefix'
-    if (ch === '>') return 'flow'
-    // 遇到空格/制表符说明进入参数区，不再向前匹配
-    if (ch === ' ' || ch === '\t') break
-  }
-  return 'all'
-}
-
-// 判断光标前是否为 $变量. 形式（对象方法调用），是则返回变量名，否则返回 null
-function detectClassMethodTrigger(model, position) {
-  const line = model.getLineContent(position.lineNumber)
-  const before = line.slice(0, position.column - 1)
-  const m = before.match(/\$([^\s$%#\[.]+)\.$/)
-  return m ? m[1] : null
-}
-
-// 扫描全文，推断「变量 -> 创建函数」映射（识别 变量:...$创建函数 形式）
-function buildClassVarMap(model) {
-  const map = new Map()
-  const text = model.getValue()
-  const re = /([A-Za-z0-9_\u4e00-\u9fa5]+)\s*:\s*\$([^\s$%]+)/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    if (DIC_CLASS_METHODS[m[2]]) {
-      map.set(m[1], m[2])
-    }
-  }
-  return map
-}
-
-// 计算补全的替换范围：仅 [ 前缀与 # 段这类「插入文本以触发字符开头」的补全，
-// 需要覆盖从触发字符到光标的全部内容（含其后跟随的字符，如已输入的 [F），
-// 否则已输入的触发字符会残留，出现 [[F]、##私聊# 的重复符号
-function getReplaceRange(model, position, trigger) {
-  if (trigger !== 'prefix' && trigger !== 'kw') return undefined
-  const line = model.getLineContent(position.lineNumber)
-  const before = line.slice(0, position.column - 1)
-  const ch = trigger === 'prefix' ? '[' : '#'
-  let start = -1
-  for (let i = before.length - 1; i >= 0; i--) {
-    if (before[i] === ch) {
-      start = i
-      break
-    }
-    // 触发字符与光标之间的其它字符（如 [F）一并覆盖；遇到空白停止
-    if (before[i] === ' ' || before[i] === '\t') break
-  }
-  if (start < 0) return undefined
-  return new monaco.Range(position.lineNumber, start + 1, position.lineNumber, position.column)
-}
-
-// 计算 > 触发补全的替换范围：覆盖从本 token 起点到光标。
-// > 既作前缀（流程控制 >终止）也作后缀（框声明 JSON>），统一替换整个 token
-// 可避免补全后残留重复的 > 或框关键字（如 >>终止、JSONJSON>）。
-function getFlowReplaceRange(model, position) {
-  const line = model.getLineContent(position.lineNumber)
-  const before = line.slice(0, position.column - 1)
-  let tokenStart = 0
-  for (let i = before.length - 1; i >= 0; i--) {
-    if (before[i] === ' ' || before[i] === '\t') {
-      tokenStart = i + 1
-      break
-    }
-  }
-  return new monaco.Range(position.lineNumber, tokenStart + 1, position.lineNumber, position.column)
-}
-
-// 从后端实时拉取的已注册函数列表；加载成功则优先使用，失败时回退到上面的硬编码列表
-const dicFuncs = ref([])
-
-async function loadDicFuncs() {
-  try {
-    const data = await apiPost({ type: 'get_dic_funcs' })
-    if (data && Array.isArray(data.cmds)) {
-      dicFuncs.value = data.cmds
-    }
-  } catch (e) {
-    console.warn('读取词库函数列表失败，回退本地补全:', e)
-  }
-}
-
-// 注册词库补全：$ 命令、% 变量、# 段标记、[ 前缀标记、. 对象方法、> 流程/框
-monaco.languages.registerCompletionItemProvider('nebula', {
-  triggerCharacters: ['$', '%', '#', '[', '.', '>'],
-  provideCompletionItems(model, position, context) {
-    const triggerChar = context?.triggerCharacter
-    // 对象方法调用：$变量. 后按变量类型精确补全方法
-    const classVarName = detectClassMethodTrigger(model, position)
-    if (classVarName !== null) {
-      const classVarMap = buildClassVarMap(model)
-      const createFn = classVarMap.get(classVarName)
-      const methods = createFn ? DIC_CLASS_METHODS[createFn] || DIC_CLASS_ALL_METHODS : DIC_CLASS_ALL_METHODS
-      return { suggestions: methods.map(methodItem) }
-    }
-    // 其它位置的 . 不触发补全
-    if (triggerChar === '.') {
-      return { suggestions: [] }
-    }
-    const isTriggerChar =
-      context?.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter
-    // 字符触发时按触发类型过滤候选；非触发字符时显示全部
-    const trigger = isTriggerChar ? detectTrigger(model, position) : 'all'
-    // 替换范围：仅 [ 前缀、# 段触发时需要覆盖已输入的触发字符
-    const insertRange = getReplaceRange(model, position, trigger)
-    const flowRange = trigger === 'flow' ? getFlowReplaceRange(model, position) : undefined
-    const text = model.getValue()
-    const items = []
-
-    const showCmd = trigger === 'all' || trigger === 'cmd'
-    const showVar = trigger === 'all' || trigger === 'var'
-    const showKw = trigger === 'all' || trigger === 'kw'
-    const showPrefix = trigger === 'all' || trigger === 'prefix'
-    const showFlow = trigger === 'all' || trigger === 'flow'
-
-    // 命令
-    if (showCmd) {
-      const funcs = dicFuncs.value
-      if (Array.isArray(funcs) && funcs.length) {
-        // 后端实时列表：名称与无参标记均来自注册表
-        for (const f of funcs) {
-          if (f && f.name) items.push(cmdItem(f.name, !!f.no_arg))
-        }
-      } else {
-        // 后端未加载成功时回退本地硬编码列表
-        for (const name of DIC_CMDS_FLAT) {
-          items.push(cmdItem(name))
-        }
-      }
-    }
-
-    // 段/前缀标记
-    if (showKw || showPrefix) {
-      for (const [name, detail, insert, cat] of DIC_KEYWORDS) {
-        if (trigger === 'all') items.push(kwItem(name, detail, insert))
-        else if (cat === '#' && showKw) items.push(kwItem(name, detail, insert))
-        else if (cat === '[' && showPrefix) items.push(kwItem(name, detail, insert))
-      }
-    }
-
-    // 流程控制与框声明（> 触发）
-    if (showFlow) {
-      for (const [name, detail, insert] of DIC_FLOW_ITEMS) {
-        items.push(kwItem(name, detail, insert))
-      }
-      for (const [name, detail, insert] of DIC_BOX_ITEMS) {
-        items.push(kwItem(name, detail, insert))
-      }
-    }
-
-    // 变量
-    if (showVar) {
-      for (const [name, detail, snippet, filterText] of DIC_BUILTIN_VARS) {
-        items.push(varItem(name, detail, snippet, filterText))
-      }
-
-      // 词库中已使用的变量（去重，内置变量不重复展示）
-      const seen = new Set()
-      for (const v of scanDicVars(text)) {
-        if (!DIC_BUILTIN_VAR_SET.has(v) && !seen.has(v)) {
-          seen.add(v)
-          items.push(varItem(v, '词库中已使用'))
-        }
-      }
-
-      // 已注入的全局变量
-      for (const name of injectedGVars()) {
-        if (!DIC_BUILTIN_VAR_SET.has(name) && !seen.has(name)) {
-          seen.add(name)
-          items.push(varItem(name, '已注入的全局变量'))
-        }
-      }
-    }
-
-    // 设置替换范围：覆盖已输入的触发字符与其后内容，避免补全后残留多余符号
-    if (flowRange) {
-      for (const item of items) item.range = flowRange
-    } else if (insertRange) {
-      for (const item of items) item.range = insertRange
-    }
-
-    return { suggestions: items }
-  },
-})
-
-/* ================= 虚影文字补全（ghost text / inline suggest） ================= */
-// 收集全部命令候选（后端实时列表优先，失败回退本地硬编码）
-function collectCmdCandidates() {
-  const funcs = dicFuncs.value
-  if (Array.isArray(funcs) && funcs.length) {
-    return funcs.map((f) => ({ name: f.name, noArg: !!f.no_arg }))
-  }
-  const out = []
-  for (const name of DIC_CMDS_FLAT) out.push({ name, noArg: DIC_NO_ARG_CMDS.has(name) })
-  return out
-}
-
-// 判断光标前的虚影补全上下文：触发类型 + 已输入前缀 + 触发字符下标
-function detectInlineContext(model, position) {
-  const line = model.getLineContent(position.lineNumber)
-  const before = line.slice(0, position.column - 1)
-  for (let i = before.length - 1; i >= 0; i--) {
-    const ch = before[i]
-    if (ch === '$') return { type: 'cmd', prefix: before.slice(i + 1), startIdx: i }
-    if (ch === '%') return { type: 'var', prefix: before.slice(i + 1), startIdx: i }
-    if (ch === '#') return { type: 'kw', prefix: before.slice(i + 1), startIdx: i }
-    if (ch === '[') return { type: 'prefix', prefix: before.slice(i + 1), startIdx: i }
-    if (ch === '>') return { type: 'flow', prefix: before.slice(i + 1), startIdx: i }
-    // 遇到空格/制表符说明已进入参数区，不再提示
-    if (ch === ' ' || ch === '\t') break
-  }
-  return null
-}
-
-// 前缀匹配变量名：内置变量 → 词库已使用 → 注入全局变量
-function findVarName(prefix, text) {
-  for (const v of DIC_BUILTIN_VARS) {
-    const name = v[0]
-    const ft = v[3] || name
-    if (name.startsWith(prefix) || ft.startsWith(prefix)) return name
-  }
-  const seen = new Set()
-  for (const name of scanDicVars(text)) {
-    if (!DIC_BUILTIN_VAR_SET.has(name) && name.startsWith(prefix) && !seen.has(name)) {
-      return name
-    }
-  }
-  for (const name of injectedGVars()) {
-    if (!DIC_BUILTIN_VAR_SET.has(name) && name.startsWith(prefix) && !seen.has(name)) {
-      return name
-    }
-  }
-  return null
-}
-
-// 前缀匹配段/前缀标记（# 段、[ 前缀），返回含触发字符的完整名
-function findKeyword(prefix, type) {
-  const cat = type === 'kw' ? '#' : '['
-  for (const [name, , , c] of DIC_KEYWORDS) {
-    if (c === cat && name.startsWith(cat + prefix)) return name
-  }
-  return null
-}
-
-// 前缀匹配流程控制关键字（> 前缀），返回含触发字符的完整名
-function findFlow(prefix) {
-  for (const [name] of DIC_FLOW_ITEMS) {
-    if (name.startsWith('>' + prefix)) return name
-  }
-  return null
-}
-
-// 注册虚影文字补全：输入 $ % [ # > 后按前缀灰字提示，Tab 接受
-monaco.languages.registerInlineCompletionsProvider('nebula', {
-  provideInlineCompletions(model, position) {
-    const ctx = detectInlineContext(model, position)
-    // 需要至少输入一个前缀字符才提示，避免刚打触发符就弹首个候选
-    if (!ctx || !ctx.prefix) return { items: [] }
-
-    const prefix = ctx.prefix
-    // 空 range：从光标处追加 ghost（只补全剩余部分，不覆盖已输入前缀）
-    const range = new monaco.Range(
-      position.lineNumber,
-      position.column,
-      position.lineNumber,
-      position.column
-    )
-
-    let insertText = ''
-    if (ctx.type === 'cmd') {
-      const hit = collectCmdCandidates().find((c) => c.name.startsWith(prefix))
-      if (!hit) return { items: [] }
-      // 无参命令补闭合 $，有参命令补命令名 + 空格（光标停在参数处继续输入）
-      insertText = (hit.noArg ? hit.name + '$' : hit.name + ' ').slice(prefix.length)
-    } else if (ctx.type === 'var') {
-      const name = findVarName(prefix, model.getValue())
-      if (!name) return { items: [] }
-      insertText = (name + '%').slice(prefix.length)
-    } else if (ctx.type === 'flow') {
-      const name = findFlow(prefix)
-      if (!name) return { items: [] }
-      // name 含触发字符，去掉首个字符（>）和已输入前缀，得到剩余补全文本
-      insertText = name.slice(1 + prefix.length)
-    } else {
-      const name = findKeyword(prefix, ctx.type)
-      if (!name) return { items: [] }
-      // name 含触发字符，去掉首个字符（# 或 [）和已输入前缀，得到剩余补全文本
-      insertText = name.slice(1 + prefix.length)
-    }
-
-    return { items: [{ insertText, range }] }
-  },
-})
 
 /* ================= 外部传入词库路径（文件管理跳转） ================= */
 const props = defineProps({
@@ -790,6 +98,13 @@ const saveRun = ref(false)
 const autoSave = ref(false)
 const running = ref(false)
 const configVisible = ref(false)
+// 是否已打开词库文件：未打开时隐藏「保存词库」「运行」按钮，并让编辑器只读
+const hasOpenFile = computed(() => !!dicForm.value.path.trim())
+
+// 未打开文件时编辑器只读，打开后恢复可编辑
+watch(hasOpenFile, (open) => {
+  editor?.updateOptions({ readOnly: !open })
+})
 
 /* ================= 高亮配置（localStorage 自定义高亮 JSON） ================= */
 const highlightVisible = ref(false)
@@ -874,6 +189,8 @@ function applyConfig(saved) {
     dicForm.value.g = Array.isArray(saved.g)
       ? saved.g.filter(Boolean)
       : String(saved.g).split('\n').map((s) => s.trim()).filter(Boolean)
+    // 同步注入全局变量到共享补全模块
+    setInjectedGVars(dicForm.value.g)
   }
   if (saved.saveRun !== undefined) saveRun.value = saved.saveRun
   if (saved.autoSave !== undefined) autoSave.value = saved.autoSave
@@ -957,6 +274,8 @@ watch(
   ],
   () => {
     configDirty.value = !configsEqual(buildConfig(), configSnapshot)
+    // 同步注入全局变量到共享补全模块（$变量% 补全候选）
+    setInjectedGVars(dicForm.value.g)
   },
   { deep: true }
 )
@@ -1035,6 +354,114 @@ const editorEl = ref(null)
 let editor = null
 let suppressChange = false
 let errorDecorations = []
+let warningDecorations = []
+
+/* ================= 警告「指定无视」（Monaco 气泡显示 + 气泡内「无视」按钮） ================= */
+// 缓存最近一次编译/运行诊断，用于无视后立即刷新高亮
+let activeDiagnostics = []
+let activeRuntimeErrorLine = null
+// Monaco 气泡内「无视」按钮触发的命令 id
+const IGNORE_WARNING_COMMAND = 'nebula.dic.ignoreWarning'
+// 命令是否已注册（组件多次挂载时避免重复注册）
+let ignoreWarningCommandRegistered = false
+
+function ignoreWarningsKey(path) {
+  return 'nebula_dic_debug_ignore_' + encodeURIComponent(path)
+}
+
+function loadIgnoredWarnings(path) {
+  try {
+    const raw = localStorage.getItem(ignoreWarningsKey(path))
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []
+  } catch (e) {
+    return []
+  }
+}
+
+function saveIgnoredWarnings(path, arr) {
+  try {
+    localStorage.setItem(ignoreWarningsKey(path), JSON.stringify(arr))
+  } catch (e) {
+    console.warn('保存无视警告失败:', e)
+  }
+}
+
+// 将某类警告（按文本）加入无视列表并刷新高亮
+function ignoreWarningByText(text) {
+  if (!text) return
+  const path = dicForm.value.path.trim()
+  if (!path) return
+  const arr = loadIgnoredWarnings(path)
+  if (!arr.includes(text)) arr.push(text)
+  saveIgnoredWarnings(path, arr)
+  applyDiagnostics(activeDiagnostics, activeRuntimeErrorLine)
+}
+
+// 「已无视警告」管理弹窗：状态与当前文件已无视的警告列表
+const ignoredVisible = ref(false)
+const ignoredWarningsList = ref([])
+
+function refreshIgnoredWarnings() {
+  const path = dicForm.value.path.trim()
+  ignoredWarningsList.value = path ? loadIgnoredWarnings(path) : []
+}
+
+function openIgnoredDialog() {
+  refreshIgnoredWarnings()
+  ignoredVisible.value = true
+}
+
+// 解除单条无视：从列表移除并刷新高亮
+function removeIgnoredWarning(text) {
+  const path = dicForm.value.path.trim()
+  if (!path) return
+  const arr = loadIgnoredWarnings(path)
+  const i = arr.indexOf(text)
+  if (i >= 0) arr.splice(i, 1)
+  saveIgnoredWarnings(path, arr)
+  refreshIgnoredWarnings()
+  applyDiagnostics(activeDiagnostics, activeRuntimeErrorLine)
+}
+
+// 清除当前文件全部无视状态
+function clearAllIgnoredWarnings() {
+  const path = dicForm.value.path.trim()
+  if (!path) return
+  saveIgnoredWarnings(path, [])
+  refreshIgnoredWarnings()
+  applyDiagnostics(activeDiagnostics, activeRuntimeErrorLine)
+}
+
+// 气泡内「无视」按钮：二次确认后执行无视
+function confirmIgnoreWarning(text) {
+  if (!text) return
+  ElMessageBox.confirm(
+    h('div', { class: 'ignore-warning-confirm' }, [
+      h('p', { class: 'ignore-warning-text' }, text),
+      h('p', { class: 'ignore-warning-tip' }, '确认无视此类警告？确认后同文本警告将不再高亮。'),
+    ]),
+    '无视警告',
+    {
+      confirmButtonText: '确认无视',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(() => ignoreWarningByText(text))
+    .catch(() => {})
+}
+
+// 转义 markdown 行内特殊字符，避免警告文本破坏气泡渲染或命令链接
+function escapeMarkdownInline(s) {
+  return String(s).replace(/([\\`*_[\]()<>#+\-.!|{}~])/g, '\\$1')
+}
+
+// 生成警告气泡内容：警告文本 + 右侧「无视」按钮（Monaco command 链接）
+function warningHoverMarkdown(text) {
+  const args = encodeURIComponent(JSON.stringify([text]))
+  return `${escapeMarkdownInline(text)}  [无视](command:${IGNORE_WARNING_COMMAND}?${args})`
+}
 
 // 清除错误行高亮
 function clearErrorHighlight() {
@@ -1044,24 +471,93 @@ function clearErrorHighlight() {
   }
 }
 
-// 高亮错误行（红色背景）
-function highlightErrorLine(line) {
-  if (!editor || !line || line < 1) return
+// 清除警告行高亮
+function clearWarningHighlight() {
+  if (editor && warningDecorations.length) {
+    editor.deltaDecorations(warningDecorations, [])
+    warningDecorations = []
+  }
+}
+
+// 高亮错误行（红色背景），支持多行；触摸/悬停红色区域时显示错误文本
+function highlightErrorLines(errors) {
+  if (!editor || !errors || !errors.length) return
   clearErrorHighlight()
-  errorDecorations = editor.deltaDecorations([], [
-    {
-      range: new monaco.Range(line, 1, line, 1),
-      options: {
-        isWholeLine: true,
-        className: 'dic-error-line',
-        glyphMarginClassName: 'dic-error-glyph',
-        glyphMarginHoverMessage: { value: `错误发生在第 ${line} 行` },
-        overviewRuler: { color: 'rgba(255, 0, 0, 0.6)', position: monaco.editor.OverviewRulerLane.Full },
-      },
+  const valid = errors.filter((e) => e && e.line >= 1)
+  if (!valid.length) return
+  errorDecorations = editor.deltaDecorations([], valid.map((e) => ({
+    range: new monaco.Range(e.line, 1, e.line, 1),
+    options: {
+      isWholeLine: true,
+      className: 'dic-error-line',
+      glyphMarginClassName: 'dic-error-glyph',
+      hoverMessage: { value: e.text },
+      overviewRuler: { color: 'rgba(255, 0, 0, 0.6)', position: monaco.editor.OverviewRulerLane.Full },
     },
-  ])
-  // 滚动到错误行并居中
-  editor.revealLineInCenter(line)
+  })))
+  // 滚动到第一条错误行并居中
+  editor.revealLineInCenter(valid[0].line)
+}
+
+// 高亮警告行（黄色背景），支持多行；Monaco 原生气泡显示警告文本 + 「无视」按钮
+function highlightWarningLines(warnings) {
+  if (!editor || !warnings || !warnings.length) return
+  clearWarningHighlight()
+  const valid = warnings.filter((w) => w && w.line >= 1)
+  if (!valid.length) return
+  warningDecorations = editor.deltaDecorations([], valid.map((w) => ({
+    range: new monaco.Range(w.line, 1, w.line, 1),
+    options: {
+      isWholeLine: true,
+      className: 'dic-warning-line',
+      glyphMarginClassName: 'dic-warning-glyph',
+      hoverMessage: { value: warningHoverMarkdown(w.text), isTrusted: true },
+      overviewRuler: { color: 'rgba(230, 162, 60, 0.6)', position: monaco.editor.OverviewRulerLane.Full },
+    },
+  })))
+  // 滚动到第一条警告行并居中
+  editor.revealLineInCenter(valid[0].line)
+}
+
+// 将词库路径规范为与后端 #引入= 编译链一致的规范形式（private/xxx.n），
+// 用于把警告的 file 字段与当前打开文件路径对齐，避免引入词库的警告串到当前文件。
+function normalizeDicPath(p) {
+  let s = String(p || '').replace(/\\/g, '/')
+  if (!s.startsWith('private/')) s = 'private/' + s
+  if (!s.endsWith('.n')) s += '.n'
+  return s
+}
+
+// 应用编译/运行诊断：level=error 标红，其余标黄；runtimeErrorLine 追加为红色。
+// 先标黄后标红，确保最终滚动定位优先落在第一条红色错误上。
+function applyDiagnostics(issues, runtimeErrorLine) {
+  const path = dicForm.value.path.trim()
+  const curPath = normalizeDicPath(path)
+  // 只高亮当前打开文件的诊断：引入词库（#引入=）产生的错误/警告会携带 file 字段，
+  // 若不按文件过滤会把其它词库的问题串到当前文件，导致行号对不上。
+  const list = (Array.isArray(issues) ? issues : []).filter((w) => !w || !w.file || w.file === curPath)
+  activeDiagnostics = list
+  activeRuntimeErrorLine = runtimeErrorLine
+  // 被「无视」的同类警告（按文本）不再高亮；错误始终显示
+  const ignored = path ? new Set(loadIgnoredWarnings(path)) : new Set()
+  const errors = list
+    .filter((w) => w && w.level === 'error')
+    .map((w) => ({ line: w.line, text: w.text }))
+  if (runtimeErrorLine) {
+    errors.push({ line: runtimeErrorLine, text: `运行错误发生在第 ${runtimeErrorLine} 行` })
+  }
+  const warnings = list.filter((w) => w && w.level !== 'error' && !ignored.has(w.text))
+
+  if (warnings.length) {
+    highlightWarningLines(warnings)
+  } else {
+    clearWarningHighlight()
+  }
+  if (errors.length) {
+    highlightErrorLines(errors)
+  } else {
+    clearErrorHighlight()
+  }
 }
 
 function createEditor() {
@@ -1069,6 +565,8 @@ function createEditor() {
   editor = monaco.editor.create(editorEl.value, {
     value: dicContent.value,
     language: 'nebula',
+    // 未打开词库文件时编辑器只读，避免误编辑
+    readOnly: !hasOpenFile.value,
     theme: isDarkMode.value ? 'nebula-dark' : 'nebula-light',
     automaticLayout: true,
     minimap: { enabled: false },
@@ -1092,6 +590,10 @@ function createEditor() {
     suggestOnTriggerCharacters: true,
     // 开启虚影文字补全（ghost text），Tab 接受
     inlineSuggest: { enabled: true },
+    // 悬浮提示（如警告）用 fixed 定位，避免被编辑器容器 overflow:hidden 裁剪导致第一行提示不可见
+    fixedOverflowWidgets: true,
+    // 关闭 Monaco 默认右键菜单，改为自定义「警告无视」菜单（长按/右键）
+    contextmenu: false,
   })
   // 编辑器内容变更同步到 dicContent 并缓存到本地
   editor.onDidChangeModelContent(() => {
@@ -1120,6 +622,20 @@ function createEditor() {
   )
   // 禁用 Shift+Alt+A 块注释快捷键（块注释不提供快捷键）
   editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyA, () => {})
+  // 关闭 Monaco 默认右键菜单并抑制浏览器原生右键菜单
+  editor.onContextMenu((e) => {
+    if (e && e.event) e.event.preventDefault()
+  })
+  // 注册气泡内「无视」按钮命令（仅注册一次）
+  if (!ignoreWarningCommandRegistered) {
+    ignoreWarningCommandRegistered = true
+    monaco.editor.addCommand({
+      id: IGNORE_WARNING_COMMAND,
+      run: (_accessor, text) => {
+        confirmIgnoreWarning(text)
+      },
+    })
+  }
 }
 
 function setEditorValue(text) {
@@ -1426,6 +942,8 @@ async function handleReset() {
     setEditorValue(data.content || '')
     contentDirty.value = false
     initHistory(path, dicContent.value)
+    // 编译检测：读取文件内容后高亮错误（红）/ 警告（黄）
+    applyDiagnostics(data && data.warnings, null)
     ElMessage.success('已重置为文件内容')
   } catch (e) {
     console.warn('重置失败:', e)
@@ -1460,11 +978,33 @@ async function loadDicContent(path) {
   contentLoading.value = true
   try {
     const data = await apiPost({ type: 'dic_get_content', data: { path } })
+    // 文件不存在：关闭该标签，避免停留在「已打开」的空编辑状态
+    if (data && data.status === 'not_found') {
+      clearContentCache(path)
+      clearHistory(path)
+      clearViewState(path)
+      const idx = openTabs.value.findIndex((t) => t.path === path)
+      if (idx >= 0) {
+        const wasActive = dicForm.value.path.trim() === path
+        openTabs.value.splice(idx, 1)
+        if (wasActive) {
+          const next = openTabs.value[Math.min(idx, openTabs.value.length - 1)]
+          dicForm.value.path = next ? next.path : ''
+        }
+        // 关闭非激活标签不会触发 path watcher，需显式持久化；全部关闭也需持久化空列表
+        if (!wasActive || !dicForm.value.path.trim()) {
+          persistOpenState()
+        }
+      }
+      ElMessage.warning('词库文件不存在: ' + path)
+      return
+    }
     setEditorValue(data.content || '')
     restoreViewState(path)
     initHistory(path, dicContent.value)
+    // 编译检测：打开词库文件时编译一次，高亮错误（红）/ 警告（黄）
+    applyDiagnostics(data && data.warnings, null)
   } catch (e) {
-    // 文件不存在视为新词库，允许直接编辑
     console.warn('读取词库内容失败:', e)
     setEditorValue('')
     initHistory(path, '')
@@ -1495,12 +1035,14 @@ function scheduleAutoSave() {
 async function doAutoSave(path) {
   if (!path) return
   try {
-    await apiPost({
+    const data = await apiPost({
       type: 'dic_save_content',
       data: { path, content: dicContent.value },
     })
     contentDirty.value = false
     clearContentCache(path)
+    // 编译检测：保存后立即高亮错误（红）/ 警告（黄）
+    applyDiagnostics(data && data.warnings, null)
     // 与「保存运行」配合：自动保存完成后也自动运行，实时查看效果
     if (saveRun.value) {
       // 保持页面停留在原地，避免结果区更新引起的滚动跳动
@@ -1521,13 +1063,15 @@ async function saveContent() {
   }
   saving.value = true
   try {
-    await apiPost({
+    const data = await apiPost({
       type: 'dic_save_content',
       data: { path: dicForm.value.path.trim(), content: dicContent.value },
     })
     contentDirty.value = false
     clearContentCache(dicForm.value.path.trim())
     ElMessage.success('词库已保存')
+    // 编译检测：保存后立即高亮错误（红）/ 警告（黄）
+    applyDiagnostics(data && data.warnings, null)
     // 保存运行：开启后保存完成自动运行（内容已保存，跳过重复保存）
     if (saveRun.value) {
       // 保持页面停留在原地，避免结果区更新引起的滚动跳动
@@ -1545,6 +1089,7 @@ async function saveContent() {
 /* ================= 运行结果 ================= */
 const result = ref(null)
 const runError = ref('')
+const runWarnings = ref([])
 const showOutputFull = ref(false) // 放大查看输出弹窗
 // 长字符串变量展开状态：节点 id -> true
 const expandedVars = ref({})
@@ -1749,7 +1294,9 @@ async function runDic(skipSave = false) {
   }
   running.value = true
   runError.value = ''
+  runWarnings.value = []
   clearErrorHighlight()
+  clearWarningHighlight()
   try {
     // 实时生效：运行前自动保存当前编辑的词库内容（由保存运行触发时已保存过，跳过）
     if (!skipSave) {
@@ -1770,17 +1317,23 @@ async function runDic(skipSave = false) {
       },
     })
     result.value = data
+    // 编译问题（error 红 / warning 黄）+ 运行报错行：统一应用到编辑器高亮
+    runWarnings.value = (data && data.warnings) ? data.warnings : []
+    applyDiagnostics(runWarnings.value, data && data.errorLine)
+    // 编译存在 error 级诊断：后端已拒绝运行，这里显示原因（错误行已由 applyDiagnostics 高亮）
+    if (data && data.compileError) {
+      runError.value = data.compileError
+    }
     // 超时：提示用户词库执行被强行打断
     if (data && data.timedOut) {
       ElMessage.warning('词库执行超时，已强制中断')
     }
-    // 报错行高亮
-    if (data && data.errorLine) {
-      highlightErrorLine(data.errorLine)
-    }
   } catch (e) {
     console.error('词库运行失败:', e)
     runError.value = e.message || '词库运行失败'
+    runWarnings.value = []
+    clearWarningHighlight()
+    clearErrorHighlight()
     result.value = null
   } finally {
     running.value = false
@@ -2042,7 +1595,9 @@ watch(
       // 切换词库后清除上次结果
       result.value = null
       runError.value = ''
+      runWarnings.value = []
       clearErrorHighlight()
+      clearWarningHighlight()
       // 标签过多时把激活标签滚动到可视区域
       scrollActiveTabIntoView()
     } else {
@@ -2053,7 +1608,9 @@ watch(
       updateUndoState()
       result.value = null
       runError.value = ''
+      runWarnings.value = []
       clearErrorHighlight()
+      clearWarningHighlight()
     }
   }
 )
@@ -2128,19 +1685,41 @@ onBeforeUnmount(() => {
 <template>
   <div class="page">
     <div class="page-header page-header-flex">
-      <div class="page-header-info">
-        <h2 class="page-title">词库调试</h2>
-        <p class="page-subtitle">实时编辑词库并运行查看输出结果与变量</p>
-      </div>
       <div class="page-header-actions">
-        <ElButton :icon="Brush" @click="openHighlightConfig">
-          高亮配置
-        </ElButton>
-        <ElButton type="primary" :icon="Setting" @click="configVisible = true">
-          运行配置
-        </ElButton>
+        <ElButton :icon="Setting" text title="运行配置" @click="configVisible = true" />
+        <ElButton :icon="Brush" text title="高亮配置" @click="openHighlightConfig" />
+        <ElButton :icon="Warning" text title="已无视的警告" @click="openIgnoredDialog" />
+        <ElButton
+          v-if="hasOpenFile"
+          class="run-btn"
+          type="primary"
+          :icon="VideoPlay"
+          :loading="running"
+          title="运行词库"
+          @click="runDic"
+        >运行</ElButton>
       </div>
     </div>
+
+    <!-- 已无视警告弹窗 -->
+    <ElDialog
+      v-model="ignoredVisible"
+      title="已无视的警告"
+      :width="isMobile ? '92%' : 420"
+      destroy-on-close
+    >
+      <div v-if="ignoredWarningsList.length" class="ignored-list">
+        <div v-for="text in ignoredWarningsList" :key="text" class="ignored-item">
+          <span class="ignored-text">{{ text }}</span>
+          <ElButton size="small" text type="primary" @click="removeIgnoredWarning(text)">恢复</ElButton>
+        </div>
+      </div>
+      <ElEmpty v-else description="暂无已无视的警告" :image-size="60" />
+      <template #footer>
+        <ElButton @click="ignoredVisible = false">关闭</ElButton>
+        <ElButton type="danger" :disabled="!ignoredWarningsList.length" @click="clearAllIgnoredWarnings">清除全部</ElButton>
+      </template>
+    </ElDialog>
 
     <!-- 运行配置弹窗 -->
     <ElDialog
@@ -2305,6 +1884,7 @@ onBeforeUnmount(() => {
         <div class="content-actions">
           <span v-if="contentDirty" class="dirty-tip">内容已修改，运行前将自动保存</span>
           <ElButton
+            v-if="isMobile"
             :icon="ArrowLeftBold"
             :disabled="!canUndo"
             @click="undoContent"
@@ -2312,32 +1892,24 @@ onBeforeUnmount(() => {
             上一步
           </ElButton>
           <ElButton
+            v-if="isMobile"
             :icon="ArrowRightBold"
             :disabled="!canRedo"
             @click="redoContent"
           >
             下一步
           </ElButton>
-          <!-- 实时保存开启时由编辑自动写盘，隐藏手动保存按钮 -->
-          <ElButton
-            v-if="!autoSave"
-            type="success"
-            :icon="DocumentChecked"
-            :loading="saving"
-            @click="saveContent"
-          >
-            保存词库
-          </ElButton>
-          <ElButton
-            class="run-btn"
-            type="primary"
-            :icon="VideoPlay"
-            :loading="running"
-            @click="runDic"
-          >
-            运行词库
-          </ElButton>
         </div>
+        <!-- 实时保存开启时由编辑自动写盘，隐藏手动保存按钮；未打开文件时同样隐藏 -->
+        <ElButton
+          v-if="!autoSave && hasOpenFile"
+          type="success"
+          :icon="DocumentChecked"
+          :loading="saving"
+          @click="saveContent"
+        >
+          保存词库
+        </ElButton>
       </div>
 
       <!-- 多开标签栏：多标签切换编辑词库文件 -->
@@ -2502,19 +2074,18 @@ onBeforeUnmount(() => {
 
     <!-- 运行输出 -->
     <div class="output-zone">
-      <div class="output-actions">
+      <div v-if="result" class="output-actions">
         <ElButton
           size="small"
           type="primary"
           plain
           :icon="FullScreen"
-          :disabled="!result"
           @click="showOutputFull = true"
         >
           放大
         </ElButton>
         <ElButton
-          v-if="result && !runError"
+          v-if="!runError"
           size="small"
           type="primary"
           plain
@@ -2615,6 +2186,11 @@ onBeforeUnmount(() => {
 
 .page {
   width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .page-header {
@@ -2624,28 +2200,19 @@ onBeforeUnmount(() => {
 .page-header-flex {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
 }
 
 .page-header-actions {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.page-title {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: -0.3px;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
+.page-header-actions .run-btn {
+  margin-left: auto;
 }
 
 .highlight-dialog-body {
@@ -2687,7 +2254,9 @@ onBeforeUnmount(() => {
   gap: 6px;
   margin-bottom: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
+  min-height: 30px;
 }
 
 .dic-tab {
@@ -2847,11 +2416,6 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-/* 运行词库：靠右放置 */
-.content-actions .run-btn {
-  margin-left: auto;
-}
-
 .dirty-tip {
   font-size: 12px;
   color: var(--el-color-warning);
@@ -2937,6 +2501,7 @@ onBeforeUnmount(() => {
 
 .form-hint {
   margin-top: 4px;
+  flex-basis: 100%;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
@@ -3018,6 +2583,30 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
+/* 已无视警告弹窗 */
+.ignored-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ignored-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+}
+.ignored-text {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
 /* 关闭运行配置弹窗时的保存确认框 */
 .config-save-confirm {
   display: flex;
@@ -3054,11 +2643,12 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 
-/* 输出区域：固定高度 */
+/* 输出区域：填满下方剩余空间 */
 .output-zone {
   position: relative;
+  flex: 1;
+  min-height: 240px;
   margin-top: 16px;
-  height: 240px;
   overflow: auto;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
@@ -3070,8 +2660,6 @@ onBeforeUnmount(() => {
   top: 8px;
   right: 8px;
   z-index: 1;
-  display: flex;
-  gap: 8px;
 }
 
 .output-text {
@@ -3236,10 +2824,6 @@ onBeforeUnmount(() => {
     padding: 20px 16px;
   }
 
-  .page-title {
-    font-size: 18px;
-  }
-
   .editor-vars-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3308,14 +2892,6 @@ onBeforeUnmount(() => {
     margin-left: 0;
   }
 
-  .page-title {
-    font-size: 16px;
-  }
-
-  .page-subtitle {
-    font-size: 12px;
-  }
-
   .dic-editor,
   .vars-panel {
     height: 45vh;
@@ -3323,7 +2899,8 @@ onBeforeUnmount(() => {
   }
 
   .output-zone {
-    height: 200px;
+    flex: 1;
+    min-height: 200px;
   }
 
   /* 全局变量输入：两输入框与按钮改为纵向排列 */
@@ -3355,5 +2932,32 @@ onBeforeUnmount(() => {
   background: #e74c3c;
   width: 3px !important;
   margin-left: 3px;
+}
+/* DIC 调试警告行高亮（黄色） */
+.dic-warning-line {
+  background-color: rgba(230, 162, 60, 0.15) !important;
+  border-left: 3px solid #e6a23c !important;
+}
+.dic-warning-glyph {
+  background: #e6a23c;
+  width: 3px !important;
+  margin-left: 3px;
+}
+/* 无视警告二次确认弹窗内容（渲染在 body，需非 scoped） */
+.ignore-warning-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ignore-warning-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+}
+.ignore-warning-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>

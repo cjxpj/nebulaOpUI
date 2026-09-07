@@ -19,7 +19,7 @@
             v-model="key"
             type="password"
             class="login-input"
-            placeholder="请输入密钥"
+            placeholder="请输入登录密码"
             @input="connectionError = false"
             @keyup.enter="doLogin()"
           />
@@ -100,7 +100,7 @@ async function doLogin(k) {
       storage.setItem('nebula_opui_key', keyToTry)
       emit('login-success')
     } else {
-      error.value = '密钥错误'
+      error.value = '密码错误'
       key.value = ''
       await nextTick()
       keyInput.value?.focus()

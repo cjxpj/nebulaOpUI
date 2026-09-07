@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
@@ -8,8 +8,9 @@ const { isMobile } = useMobile()
 const loading = ref(false)
 const loadFailed = ref(false)
 const list = ref([])
-const autoRefresh = ref(true)
+const lastUpdate = ref('')
 const expanded = ref({})
+const collapsedClasses = ref({})
 
 // 添加
 const adding = ref(false)
@@ -24,6 +25,11 @@ const editValue = ref('')
 let timer = null
 
 const VAR_LIMIT = 100
+const PAGE_SIZE = 50
+const total = ref(0)
+const hasMore = ref(false)
+const loadingMore = ref(false)
+const scrollBoxRef = ref(null)
 
 function isValidKey(key) {
   const k = (key || '').trim()
@@ -31,33 +37,80 @@ function isValidKey(key) {
     ElMessage.error('键不能为空')
     return false
   }
-  if (k.startsWith('_')) {
-    ElMessage.error('键不能以下划线开头（系统保留）')
-    return false
-  }
   return true
 }
 
-function isLong(row) {
-  return String(row.v ?? '').length > VAR_LIMIT
+function isLong(item) {
+  return String(item.v ?? '').length > VAR_LIMIT
 }
 
-function displayVal(row) {
-  const s = String(row.v ?? '')
-  if (!expanded.value[row.key] && s.length > VAR_LIMIT) {
+function displayVal(item, id) {
+  const s = String(item.v ?? '')
+  if (!expanded.value[id] && s.length > VAR_LIMIT) {
     return s.slice(0, VAR_LIMIT) + '…'
   }
   return s
 }
 
-function toggleExpand(row) {
-  expanded.value[row.key] = !expanded.value[row.key]
+function toggleExpand(item, id) {
+  expanded.value[id] = !expanded.value[id]
 }
 
+// 是否为可折叠的类对象/对象/数组（含 children 成员变量）
+function isClassVal(item) {
+  return (
+    item &&
+    item.children &&
+    typeof item.children === 'object' &&
+    !Array.isArray(item.children) &&
+    Object.keys(item.children).length > 0
+  )
+}
+
+function isClassCollapsed(id) {
+  return !!collapsedClasses.value[id]
+}
+
+function toggleClass(id) {
+  if (collapsedClasses.value[id]) {
+    delete collapsedClasses.value[id]
+  } else {
+    collapsedClasses.value[id] = true
+  }
+}
+
+function nodeId(path) {
+  return path.join('.')
+}
+
+// 将线程变量树展开为可见行，类对象/对象/数组成员按折叠状态展开
+const rows = computed(() => {
+  const out = []
+  const walk = (key, item, depth, path) => {
+    const id = nodeId(path)
+    const hasChildren = isClassVal(item)
+    const collapsed = hasChildren && isClassCollapsed(id)
+    out.push({ key, item, depth, id, hasChildren, collapsed, top: depth === 0 })
+    if (hasChildren && !collapsed) {
+      for (const [ck, cv] of Object.entries(item.children)) {
+        walk(ck, cv, depth + 1, [...path, ck])
+      }
+    }
+  }
+  for (const it of list.value) {
+    walk(it.key, it, 0, [it.key])
+  }
+  return out
+})
+
 function startEdit(row) {
+  const item = row.item || row
+  if (item.t === '类') {
+    ElMessage.warning('该变量为类实例，编辑后将变为字符串')
+  }
   editingKey.value = row.key
   editKey.value = row.key
-  editValue.value = String(row.v ?? '')
+  editValue.value = String(item.v ?? '')
 }
 
 function cancelEdit() {
@@ -79,18 +132,64 @@ function cancelAdd() {
   newValue.value = ''
 }
 
-async function loadList({ silent = false } = {}) {
-  if (!silent) loading.value = true
+async function fetchVars({ reset = false, silent = false } = {}) {
+  if (reset) {
+    if (!silent) loading.value = true
+  } else {
+    if (loadingMore.value) return
+    loadingMore.value = true
+  }
   loadFailed.value = false
+  const skip = reset ? 0 : list.value.length
   try {
-    const data = await apiPost({ type: 'get_thread_vars' })
-    list.value = data.list || []
+    const data = await apiPost({ type: 'get_thread_vars', data: { limit: PAGE_SIZE, skip } })
+    const items = data.list || []
+    if (reset) {
+      list.value = items
+    } else {
+      list.value = list.value.concat(items)
+    }
+    total.value = data.total ?? list.value.length
+    hasMore.value = !!data.hasMore
+    lastUpdate.value = new Date().toLocaleString()
   } catch (e) {
     console.error('获取线程变量失败:', e)
     loadFailed.value = true
     if (!silent) ElMessage.error('获取线程变量失败')
   } finally {
-    if (!silent) loading.value = false
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+function loadList({ silent = false } = {}) {
+  return fetchVars({ reset: true, silent })
+}
+
+function loadMore() {
+  return fetchVars({ reset: false, silent: true })
+}
+
+// 静默刷新已加载区间（供定时器使用），只重取当前已加载条数，避免每次都全量拉取
+async function refreshLoaded() {
+  if (loadingMore.value) return
+  try {
+    const limit = Math.max(PAGE_SIZE, list.value.length)
+    const data = await apiPost({ type: 'get_thread_vars', data: { limit, skip: 0 } })
+    list.value = data.list || []
+    total.value = data.total ?? list.value.length
+    hasMore.value = !!data.hasMore
+    lastUpdate.value = new Date().toLocaleString()
+  } catch (e) {
+    // 静默刷新失败不打断
+  }
+}
+
+function onScroll() {
+  const el = scrollBoxRef.value
+  if (!el || !hasMore.value || loadingMore.value) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+    loadMore()
   }
 }
 
@@ -160,7 +259,7 @@ async function deleteRow(row) {
 
 async function clearThreadVars() {
   try {
-    await ElMessageBox.confirm('确定清空全部线程变量吗？（系统内部变量会保留）', '清空线程变量', {
+    await ElMessageBox.confirm('确定清空全部线程变量吗？', '清空线程变量', {
       confirmButtonText: '清空',
       cancelButtonText: '取消',
       type: 'warning',
@@ -183,7 +282,7 @@ async function clearThreadVars() {
 function startTimer() {
   stopTimer()
   timer = setInterval(() => {
-    if (autoRefresh.value) loadList({ silent: true })
+    refreshLoaded()
   }, 2000)
 }
 
@@ -199,19 +298,14 @@ onMounted(() => {
   startTimer()
 })
 
-onBeforeUnmount(stopTimer)
+onBeforeUnmount(() => {
+  stopTimer()
+})
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
-      <h2 class="page-title">实时线程变量</h2>
-      <p class="page-subtitle">点击键或值可编辑，支持添加与指定删除</p>
-    </div>
-
+  <div class="page" v-loading="loading">
     <div class="toolbar">
-      <ElSwitch v-model="autoRefresh" active-text="自动刷新" />
-      <ElButton size="small" @click="loadList()">刷新</ElButton>
       <ElButton size="small" type="primary" @click="startAdd">添加</ElButton>
       <ElButton
         size="small"
@@ -219,6 +313,10 @@ onBeforeUnmount(stopTimer)
         :disabled="!list.length"
         @click="clearThreadVars"
       >回收清空</ElButton>
+      <div class="toolbar-right">
+        <span v-if="lastUpdate" class="update-time">更新于 {{ lastUpdate }}</span>
+        <ElButton size="small" @click="loadList()">刷新</ElButton>
+      </div>
     </div>
 
     <div v-if="adding" class="add-form">
@@ -228,80 +326,107 @@ onBeforeUnmount(stopTimer)
       <ElButton size="small" @click="cancelAdd">取消</ElButton>
     </div>
 
-    <div class="panel-card" v-loading="loading">
-      <ElEmpty
-        v-if="!loadFailed && list.length === 0"
-        description="暂无线程变量"
-      />
+    <ElEmpty
+      v-if="!loadFailed && list.length === 0"
+      description="暂无线程变量"
+    />
+    <div
+      v-else
+      ref="scrollBoxRef"
+      class="table-scroll"
+      @scroll="onScroll"
+    >
       <ElTable
-        v-else
-        :data="list"
-        :size="isMobile ? 'small' : 'default'"
-        empty-text="暂无线程变量"
-      >
-        <ElTableColumn label="键" min-width="140">
-          <template #default="{ row }">
-            <ElInput
-              v-if="editingKey === row.key"
-              v-model="editKey"
-              size="small"
-            />
-            <span
-              v-else
-              class="cell-click"
-              title="点击编辑"
-              @click="startEdit(row)"
-            >{{ row.key }}</span>
-          </template>
-        </ElTableColumn>
-
-        <ElTableColumn prop="t" label="类型" :width="isMobile ? 90 : 120" />
-
-        <ElTableColumn label="值" min-width="260">
-          <template #default="{ row }">
-            <ElInput
-              v-if="editingKey === row.key"
-              v-model="editValue"
-              type="textarea"
-              :autosize="{ minRows: 1, maxRows: 6 }"
-              size="small"
-            />
-            <div v-else class="val-cell">
-              <span
-                class="val-text cell-click"
-                title="点击编辑"
-                @click="startEdit(row)"
-              >{{ displayVal(row) }}</span>
-              <ElButton
-                v-if="isLong(row)"
-                link
-                type="primary"
+          :data="rows"
+          :size="isMobile ? 'small' : 'default'"
+          empty-text="暂无线程变量"
+        >
+          <ElTableColumn label="键" min-width="180">
+            <template #default="{ row }">
+              <ElInput
+                v-if="row.top && editingKey === row.key"
+                v-model="editKey"
                 size="small"
-                @click.stop="toggleExpand(row)"
+              />
+              <div
+                v-else
+                class="key-cell"
+                :style="{ paddingLeft: row.depth * 14 + 'px' }"
               >
-                {{ expanded[row.key] ? '收起' : '展开' }}
-              </ElButton>
-            </div>
-          </template>
-        </ElTableColumn>
-
-        <ElTableColumn label="操作" :width="isMobile ? 130 : 160">
-          <template #default="{ row }">
-            <template v-if="editingKey === row.key">
-              <ElButton size="small" type="primary" @click="saveEdit">保存</ElButton>
-              <ElButton size="small" @click="cancelEdit">取消</ElButton>
+                <span
+                  v-if="row.hasChildren"
+                  class="var-arrow"
+                  @click="toggleClass(row.id)"
+                >{{ row.collapsed ? '▶' : '▼' }}</span>
+                <ElTag v-if="row.item.t" size="small" type="info">{{ row.item.t }}</ElTag>
+                <span
+                  v-if="row.top"
+                  class="cell-click"
+                  title="点击编辑"
+                  @click="startEdit(row)"
+                >{{ row.key }}</span>
+                <span v-else class="var-key">{{ row.key }}</span>
+              </div>
             </template>
-            <ElButton
-              v-else
-              size="small"
-              type="danger"
-              link
-              @click="deleteRow(row)"
-            >删除</ElButton>
-          </template>
-        </ElTableColumn>
-      </ElTable>
-    </div>
+          </ElTableColumn>
+
+          <ElTableColumn label="值" min-width="260">
+            <template #default="{ row }">
+              <ElInput
+                v-if="row.top && editingKey === row.key"
+                v-model="editValue"
+                type="textarea"
+                :autosize="{ minRows: 1, maxRows: 6 }"
+                size="small"
+              />
+              <div v-else class="val-cell">
+                <span
+                  class="val-text"
+                  :class="{ 'cell-click': row.top }"
+                  :title="row.top ? '点击编辑' : ''"
+                  @click="row.top && startEdit(row)"
+                >{{ displayVal(row.item, row.id) }}</span>
+                <ElButton
+                  v-if="isLong(row.item)"
+                  link
+                  type="primary"
+                  size="small"
+                  @click.stop="toggleExpand(row.item, row.id)"
+                >
+                  {{ expanded[row.id] ? '收起' : '展开' }}
+                </ElButton>
+              </div>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="操作" :width="isMobile ? 130 : 160">
+            <template #default="{ row }">
+              <template v-if="row.top">
+                <template v-if="editingKey === row.key">
+                  <ElButton size="small" type="primary" @click="saveEdit">保存</ElButton>
+                  <ElButton size="small" @click="cancelEdit">取消</ElButton>
+                </template>
+                <ElButton
+                  v-else
+                  size="small"
+                  type="danger"
+                  link
+                  @click="deleteRow(row)"
+                >删除</ElButton>
+              </template>
+            </template>
+          </ElTableColumn>
+        </ElTable>
+
+        <div v-if="hasMore" class="load-more">
+          <ElButton
+            size="small"
+            :loading="loadingMore"
+            @click="loadMore"
+          >加载更多</ElButton>
+          <span class="load-more-count">已加载 {{ list.length }} / {{ total }}</span>
+        </div>
+      </div>
   </div>
 </template>
 
@@ -335,6 +460,18 @@ onBeforeUnmount(stopTimer)
   margin-bottom: 16px;
 }
 
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-time {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 .add-form {
   display: flex;
   align-items: center;
@@ -351,19 +488,6 @@ onBeforeUnmount(stopTimer)
   min-width: 0;
 }
 
-.panel-card {
-  padding: 28px 32px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
-  transition: border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.panel-card:hover {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-}
-
 .cell-click {
   cursor: pointer;
   display: inline-block;
@@ -373,6 +497,26 @@ onBeforeUnmount(stopTimer)
 
 .cell-click:hover {
   border-bottom-color: var(--el-color-primary);
+}
+
+.key-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.var-arrow {
+  cursor: pointer;
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  user-select: none;
+  font-size: 12px;
+}
+
+.var-key {
+  color: var(--el-text-color-primary);
+  word-break: break-all;
 }
 
 .val-cell {
@@ -390,11 +534,25 @@ onBeforeUnmount(stopTimer)
   white-space: pre-wrap;
 }
 
-@media (max-width: 768px) {
-  .panel-card {
-    padding: 20px 16px;
-  }
+.table-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+}
 
+.load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+}
+
+.load-more-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+@media (max-width: 768px) {
   .page-title {
     font-size: 18px;
   }
@@ -414,11 +572,6 @@ onBeforeUnmount(stopTimer)
 }
 
 @media (max-width: 480px) {
-  .panel-card {
-    padding: 16px 12px;
-    border-radius: 8px;
-  }
-
   .page-header {
     margin-bottom: 16px;
   }

@@ -11,7 +11,7 @@ import { apiPost, onPush, disconnect, onUnauthorized, onWsAddressRequired, getSt
 import { clearDocCache } from '@/docCache.js'
 
 /* ================= URL 参数注入 ================= */
-// 支持通过 GET 参数一键注入 WS 地址与登录密码：?ws=ws://host:port/nebula&key=密钥
+// 支持通过 GET 参数一键注入 WS 地址与登录密码：?ws=ws://host:port/nebula&key=密码
 const urlParams = new URLSearchParams(window.location.search)
 const urlWs = urlParams.get('ws')
 if (urlWs) {
@@ -19,7 +19,10 @@ if (urlWs) {
 }
 const urlKey = urlParams.get('key')
 if (urlKey) {
+  // key 参数（快捷登录码/登录密码）读取后即记录到本地，随后从地址栏移除，
+  // 避免刷新/重新打开/分享地址时 key 残留泄露，或重新注入覆盖本地已保存的凭证
   localStorage.setItem('nebula_opui_key', urlKey)
+  stripKeyFromUrl()
 }
 
 /* ================= 主题 ================= */
@@ -80,8 +83,18 @@ onWsAddressRequired(() => {
     .catch(() => {})
 })
 
+// 移除地址栏 get 参数中的 key（快捷登录码/登录密码）：
+// key 参数在页面加载时已被读取并记录到本地，之后 URL 中不再需要它。
+// 保留会造成 key 在刷新/重新打开时被重新注入，覆盖本地已保存的凭证（快捷登录码重启后会失效），并存在地址泄露风险
+function stripKeyFromUrl() {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('key')) return
+  url.searchParams.delete('key')
+  window.history.replaceState(null, '', url)
+}
+
 function onLoginSuccess() {
-  disconnect() // 断开旧的未认证连接，后续请求会用带 key 的 URL 重新连接
+  disconnect() // 断开旧的未认证连接，后续请求会用已保存的 key 重新连接认证
   needLogin.value = false
 }
 
@@ -119,19 +132,23 @@ onMounted(async () => {
         needLogin.value = false
         return
       }
+      // 密钥明确无效，清除并退回登录页
+      sessionStorage.removeItem('nebula_opui_key')
+      localStorage.removeItem('nebula_opui_key')
+      needLogin.value = true
+      return
     } catch (e) {
+      // 网络错误/连接失败：保留密钥，交由重连机制处理，避免一键登录的正确密钥被误清除
       console.error('[OPUI Auth] session check failed:', e)
+      return
     }
-    sessionStorage.removeItem('nebula_opui_key')
-    localStorage.removeItem('nebula_opui_key')
-    needLogin.value = true // 已保存密钥失效，退回登录页
   }
 
-  // 检查是否配置了密钥
+  // 检查是否设置了登录密码
   try {
     const data = await apiPost({ type: 'get_opui' }, { noRetry: true })
-    if (!data.secret) {
-      // 未配置密钥，无需登录
+    if (!data.has_password) {
+      // 未设置登录密码，无需登录
       needLogin.value = false
       return
     }

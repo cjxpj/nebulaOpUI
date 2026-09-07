@@ -74,82 +74,45 @@ onMounted(loadConfig)
 
 <template>
   <div class="page">
-    <div class="page-header">
-      <h2 class="page-title">Ngrok 配置</h2>
-      <p class="page-subtitle">配置 Ngrok 隧道穿透参数</p>
-    </div>
+    <ElForm :model="form" v-loading="loading" :label-position="isMobile ? 'top' : 'right'">
+      <ElFormItem label="启用 Ngrok">
+        <ElSwitch
+          v-model="form.open"
+          :disabled="loadFailed"
+          inline-prompt
+          active-text="开启"
+          inactive-text="关闭"
+        />
+      </ElFormItem>
 
-    <div class="panel-card">
-      <ElForm :model="form" v-loading="loading" :label-position="isMobile ? 'top' : 'right'">
-        <ElFormItem label="启用 Ngrok">
-          <ElSwitch
-            v-model="form.open"
-            :disabled="loadFailed"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-        </ElFormItem>
+      <ElFormItem label="Ngrok 密钥">
+        <ElInput
+          v-model="form.token"
+          placeholder="ngrok authtoken"
+          show-password
+          :disabled="loadFailed"
+        />
+      </ElFormItem>
 
-        <ElFormItem label="Ngrok 密钥">
-          <ElInput
-            v-model="form.token"
-            placeholder="ngrok authtoken"
-            show-password
-            :disabled="loadFailed"
-          />
-        </ElFormItem>
+      <ElFormItem label="绑定域名">
+        <ElInput v-model="form.domain" placeholder="example.ngrok.app" :disabled="loadFailed" />
+      </ElFormItem>
 
-        <ElFormItem label="绑定域名">
-          <ElInput v-model="form.domain" placeholder="example.ngrok.app" :disabled="loadFailed" />
-        </ElFormItem>
-
-        <!-- 操作区 -->
-        <ElFormItem>
-          <div class="form-actions">
-            <ElButton type="primary" :loading="saving" :disabled="loadFailed" @click="saveConfig">
-              保存配置
-            </ElButton>
-          </div>
-        </ElFormItem>
-      </ElForm>
-    </div>
+      <!-- 操作区 -->
+      <ElFormItem>
+        <div class="form-actions">
+          <ElButton type="primary" :loading="saving" :disabled="loadFailed" @click="saveConfig">
+            保存配置
+          </ElButton>
+        </div>
+      </ElFormItem>
+    </ElForm>
   </div>
 </template>
 
 <style scoped>
 .page {
   width: 100%;
-}
-
-.page-header {
-  margin-bottom: 24px;
-}
-
-.page-title {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: -0.3px;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.panel-card {
-  padding: 28px 32px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
-  transition: border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.panel-card:hover {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 .form-actions {
@@ -159,35 +122,8 @@ onMounted(loadConfig)
 }
 
 @media (max-width: 768px) {
-  .panel-card {
-    padding: 20px 16px;
-  }
-
-  .page-title {
-    font-size: 18px;
-  }
-
   .form-actions :deep(.el-button) {
     width: 100%;
-  }
-}
-
-@media (max-width: 480px) {
-  .panel-card {
-    padding: 16px 12px;
-    border-radius: 8px;
-  }
-
-  .page-header {
-    margin-bottom: 16px;
-  }
-
-  .page-title {
-    font-size: 16px;
-  }
-
-  .page-subtitle {
-    font-size: 12px;
   }
 }
 </style>

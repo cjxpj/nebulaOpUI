@@ -6,19 +6,13 @@
         <ElIcon :size="40"><WarningFilled /></ElIcon>
       </div>
       <h3 class="unsupported-title">当前平台不支持扩展部署</h3>
-      <p class="unsupported-desc">扩展部署功能仅适用于 Windows 端，当前平台无法安装和管理这些组件。</p>
-    </div>
-
-    <!-- 头部标题 -->
-    <div v-if="!isUnsupported" class="page-header">
-      <h2 class="page-title">扩展部署</h2>
-      <p class="page-subtitle">管理和安装服务器组件扩展</p>
+      <p class="unsupported-desc">扩展部署功能适用于 Windows 和 Linux 端，当前平台无法安装和管理这些组件。</p>
     </div>
 
     <!-- 组件卡片网格 -->
     <div v-if="!isUnsupported" class="components-grid">
       <div
-        v-for="component in components"
+        v-for="component in visibleComponents"
         :key="component.value"
         class="component-card"
         :class="{ 'is-installed': installStatus[component.value], 'is-selected': selectedComponent?.value === component.value }"
@@ -204,7 +198,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { config } from '@/config.js'
 import { apiPost } from '@/api.js'
-import { Document, Monitor, Message, VideoCamera, Mic, WarningFilled } from '@element-plus/icons-vue'
+import { Document, Monitor, Message, VideoCamera, Mic, Setting, WarningFilled } from '@element-plus/icons-vue'
 
 /* ================= 组件数据 ================= */
 const components = [
@@ -213,30 +207,42 @@ const components = [
     label: 'PHP',
     description: '服务器端脚本语言，用于运行 Web 应用',
     icon: Document,
+    platforms: ['windows'],
   },
   {
     value: 'python',
     label: 'Python',
     description: '通用编程语言，支持多种应用场景',
     icon: Document,
+    platforms: ['windows', 'linux'],
   },
   {
     value: 'napcat_bot',
     label: 'NapCat',
     description: 'QQ 机器人框架，需要 QQ 账号',
     icon: Message,
+    platforms: ['windows'],
   },
   {
     value: 'ffmpeg',
     label: 'FFmpeg',
     description: '音视频处理工具，支持格式转换',
     icon: VideoCamera,
+    platforms: ['windows'],
   },
   {
     value: 'silk_v3',
     label: 'Silk V3',
     description: '语音编解码库，用于语音处理',
     icon: Mic,
+    platforms: ['windows'],
+  },
+  {
+    value: 'go',
+    label: '词库编译环境',
+    description: 'Go 工具链，用于将词库编译为独立可执行文件',
+    icon: Setting,
+    platforms: ['windows'],
   },
 ]
 
@@ -247,6 +253,7 @@ const installPathMap = {
   napcat_bot: 'NebulaData/private/extensions/NapCat.Shell',
   ffmpeg: 'NebulaData/private/extensions/ffmpeg',
   silk_v3: 'NebulaData/private/extensions/silk_v3',
+  go: 'NebulaData/private/extensions/go',
 }
 
 const selectedComponent = ref(null)
@@ -260,12 +267,19 @@ let pollingActive = false        // 防止并发轮询
 const showNapCatDialog = ref(false)
 const showStatusDetails = ref(false)
 
-/* ================= 平台检测（扩展部署仅支持 Windows 端） ================= */
+/* ================= 平台检测 ================= */
 const platform = ref('') // 后端 host.os：windows / linux / android ...
 const platformChecked = ref(false)
 const isUnsupported = computed(
-  () => platformChecked.value && platform.value !== '' && platform.value !== 'windows',
+  () => platformChecked.value && platform.value !== '' && platform.value !== 'windows' && platform.value !== 'linux',
 )
+
+// 根据当前平台过滤可显示的组件（Linux 仅显示 Python）
+const visibleComponents = computed(() => {
+  const os = platform.value
+  if (!os) return components
+  return components.filter((c) => (c.platforms || []).includes(os))
+})
 
 async function checkPlatform() {
   try {
@@ -463,6 +477,7 @@ async function doInstall(component, params) {
     napcat_bot: 'install_napcat_bot',
     ffmpeg: 'install_ffmpeg',
     silk_v3: 'install_silk_v3',
+    go: 'install_go',
   }
   const backendType = typeMap[component.value]
   if (!backendType) {
@@ -719,25 +734,6 @@ function formatTime(time) {
   box-sizing: border-box;
 }
 
-/* ==================== 页面标题 ==================== */
-.page-header {
-  margin-bottom: 32px;
-}
-
-.page-title {
-  margin: 0 0 6px;
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: -0.3px;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
 /* ==================== 组件网格 ==================== */
 .components-grid {
   display: grid;
@@ -799,6 +795,7 @@ function formatTime(time) {
 .card-accent[data-type='napcat_bot']{ background: #1e88e5; }
 .card-accent[data-type='ffmpeg']    { background: #00bcd4; }
 .card-accent[data-type='silk_v3']   { background: #4caf50; }
+.card-accent[data-type='go']        { background: #00add8; }
 
 /* ==================== 图标区 ==================== */
 .card-icon-box {
@@ -841,6 +838,11 @@ function formatTime(time) {
   color: #388e3c;
 }
 
+.card-icon-box[data-type='go'] {
+  background: linear-gradient(135deg, #e0f7fa 0%, #cfeef2 100%);
+  color: #00a8cc;
+}
+
 /* ==================== 信息区域 ==================== */
 .card-info {
   flex: 1;
@@ -881,9 +883,7 @@ function formatTime(time) {
   font-size: 13px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 /* ==================== 操作区域 ==================== */
@@ -1038,14 +1038,6 @@ function formatTime(time) {
     padding: 16px;
   }
 
-  .page-header {
-    margin-bottom: 20px;
-  }
-
-  .page-title {
-    font-size: 20px;
-  }
-
   .components-grid {
     grid-template-columns: 1fr;
     gap: 12px;
@@ -1065,14 +1057,6 @@ function formatTime(time) {
 @media (max-width: 480px) {
   .extension-deploy {
     padding: 12px;
-  }
-
-  .page-title {
-    font-size: 16px;
-  }
-
-  .page-subtitle {
-    font-size: 12px;
   }
 
   .component-card {

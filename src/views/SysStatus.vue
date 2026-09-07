@@ -177,6 +177,14 @@
             <ElTag v-else type="success" size="small" effect="dark" class="update-tag">已是最新版本</ElTag>
           </ElDescriptionsItem>
         </ElDescriptions>
+        <ElAlert
+          v-if="updateInfo.update && updateInfo.big_update"
+          title="检测到重大版本更新，请前往下载页面手动下载最新版本"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="update-big-tip"
+        />
         <div v-if="updateInfo.update && updateInfo.notes" class="update-notes">
           <h4>更新说明</h4>
           <ElScrollbar height="200px">
@@ -185,6 +193,28 @@
         </div>
         </template>
       </template>
+
+      <!-- 下载进度 -->
+      <div v-if="downloadActive" class="update-progress">
+        <ElProgress
+          :percentage="updateProgress?.percent || 0"
+          :status="progressStatus"
+          :stroke-width="16"
+        />
+        <div class="update-progress-text">
+          <span>{{ progressText }}</span>
+          <span class="update-progress-pct">{{ updateProgress?.percent || 0 }}%</span>
+        </div>
+        <ElAlert
+          v-if="updateProgress?.status === 'failed' && updateProgress?.error"
+          :title="updateProgress.error"
+          type="error"
+          show-icon
+          :closable="false"
+          style="margin-top: 8px"
+        />
+      </div>
+
       <template #footer>
         <ElButton @click="updateDialogVisible = false">关闭</ElButton>
         <ElButton
@@ -192,28 +222,29 @@
           tag="a"
           :href="updateInfo.down_url || updateInfo.url"
           target="_blank"
-          @click="updateDialogVisible = false"
         >
           前往下载页面
         </ElButton>
         <ElButton
-          v-if="updateInfo?.update && updateInfo.down_url"
+          v-if="updateInfo?.update && updateInfo.down_url && !updateInfo.big_update && !downloadActive"
           type="primary"
-          :loading="updating"
           @click="doOnlineUpdate"
         >
           在线更新
         </ElButton>
+        <ElButton v-if="isDownloading" type="warning" @click="pauseUpdate">暂停</ElButton>
+        <ElButton v-if="isPaused" type="primary" @click="resumeUpdate">继续下载</ElButton>
+        <ElButton v-if="updateProgress?.status === 'failed'" type="primary" @click="resumeUpdate">重试</ElButton>
       </template>
     </ElDialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Refresh, ArrowDown, RefreshRight } from '@element-plus/icons-vue'
 import { useTransition } from '@vueuse/core'
-import { apiPost } from '@/api.js'
+import { apiPost, onPush } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 
 const { isMobile } = useMobile()
@@ -247,6 +278,8 @@ function tickRunTime() {
   // 高频监听时后端同步足够快，不本地自增
   const key = intervalKey.value
   if (key === 'ultra' || key === 'high') return
+  // 尚未同步到后端基准时间前保持 0，避免用未初始化的时间戳算出错误运行时长
+  if (!runTimeBaseAt) return
   runTime.value = runTimeBase + Math.floor((Date.now() - runTimeBaseAt) / 1000)
 }
 
@@ -378,19 +411,56 @@ onMounted(() => {
   startAuto()
   if (runTimeTimer) clearInterval(runTimeTimer)
   runTimeTimer = setInterval(tickRunTime, 1000)
+  bindUpdatePush()
 })
 
 onUnmounted(() => {
   stopAuto()
   if (runTimeTimer) clearInterval(runTimeTimer)
   runTimeTimer = null
+  stopUpdatePolling()
+  if (unsubUpdatePush) unsubUpdatePush()
+  unsubUpdatePush = null
 })
 
 /* ================= 检测更新 ================= */
 const checkingUpdate = ref(false)
 const updateDialogVisible = ref(false)
 const updateInfo = ref(null)
-const updating = ref(false)
+const updateProgress = ref(null)
+
+const downloadActive = computed(() => {
+  const s = updateProgress.value?.status
+  return ['preparing', 'downloading', 'paused', 'completed', 'failed', 'installing'].includes(s)
+})
+const isDownloading = computed(() => {
+  const s = updateProgress.value?.status
+  return s === 'preparing' || s === 'downloading'
+})
+const isPaused = computed(() => updateProgress.value?.status === 'paused')
+
+const progressStatus = computed(() => {
+  const s = updateProgress.value?.status
+  if (s === 'failed') return 'exception'
+  if (s === 'completed' || s === 'installing') return 'success'
+  if (s === 'paused') return 'warning'
+  return ''
+})
+
+const progressText = computed(() => {
+  const p = updateProgress.value
+  if (!p) return ''
+  const size = `${formatBytes(p.downloaded)} / ${formatBytes(p.total)}`
+  switch (p.status) {
+    case 'preparing': return '正在准备...'
+    case 'downloading': return size
+    case 'paused': return `已暂停 · ${size}`
+    case 'completed': return '下载完成，正在处理...'
+    case 'installing': return '下载完成，即将重启...'
+    case 'failed': return '下载失败'
+    default: return ''
+  }
+})
 
 async function checkUpdate() {
   if (checkingUpdate.value) return
@@ -401,6 +471,9 @@ async function checkUpdate() {
     updateDialogVisible.value = true
     if (data.status === 'error') {
       ElMessage.warning(data.error || '检测更新失败')
+    } else {
+      // 打开弹窗时同步一次下载状态，避免断线重连后丢失进度
+      refreshUpdateStatus()
     }
   } catch (e) {
     console.error('检测更新失败:', e)
@@ -411,24 +484,77 @@ async function checkUpdate() {
 }
 
 async function doOnlineUpdate() {
-  if (updating.value) return
-  updating.value = true
   try {
     await ElMessageBox.confirm(
       '即将下载最新版本并自动重启，期间服务会短暂中断，确定继续？',
       '在线更新',
       { confirmButtonText: '确定更新', cancelButtonText: '取消', type: 'warning' }
     )
-    ElMessage.info('正在下载更新，请稍候...')
-    await apiPost({ type: 'online_update' })
+    const resp = await apiPost({ type: 'online_update' })
+    if (resp?.data) updateProgress.value = resp.data
   } catch (e) {
     if (e !== 'cancel') {
       console.error('在线更新失败:', e)
       ElMessage.error('在线更新失败: ' + (e.message || '未知错误'))
     }
-  } finally {
-    updating.value = false
   }
+}
+
+async function pauseUpdate() {
+  try {
+    const resp = await apiPost({ type: 'pause_update' })
+    if (resp?.data) updateProgress.value = resp.data
+  } catch (e) {
+    ElMessage.error('暂停失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function resumeUpdate() {
+  try {
+    const resp = await apiPost({ type: 'resume_update' })
+    if (resp?.data) updateProgress.value = resp.data
+  } catch (e) {
+    ElMessage.error('继续下载失败: ' + (e.message || '未知错误'))
+  }
+}
+
+async function refreshUpdateStatus() {
+  try {
+    const resp = await apiPost({ type: 'get_update_status' })
+    if (resp) updateProgress.value = resp
+  } catch (e) { /* 推送与轮询兜底 */ }
+}
+
+// 断线重连 / 遗漏推送时的进度兜底：下载进行中每 2 秒主动拉取一次
+let updatePollTimer = null
+function startUpdatePolling() {
+  stopUpdatePolling()
+  updatePollTimer = setInterval(refreshUpdateStatus, 2000)
+}
+function stopUpdatePolling() {
+  if (updatePollTimer) clearInterval(updatePollTimer)
+  updatePollTimer = null
+}
+watch(downloadActive, (active) => {
+  if (active) startUpdatePolling()
+  else stopUpdatePolling()
+})
+
+// 服务端通过 WS 推送下载进度
+let unsubUpdatePush = null
+function bindUpdatePush() {
+  if (unsubUpdatePush) return
+  unsubUpdatePush = onPush((data) => {
+    if (data.type === 'update_progress') {
+      updateProgress.value = {
+        status: data.status,
+        total: data.total,
+        downloaded: data.downloaded,
+        percent: data.percent,
+        error: data.error,
+      }
+    }
+  })
 }
 </script>
 
@@ -683,6 +809,10 @@ async function doOnlineUpdate() {
   margin-left: 8px;
 }
 
+.update-big-tip {
+  margin-top: 12px;
+}
+
 .update-notes {
   margin-top: 16px;
 }
@@ -703,5 +833,24 @@ async function doOnlineUpdate() {
   background: var(--el-fill-color-lighter);
   border-radius: 4px;
   color: var(--el-text-color-primary);
+}
+
+.update-progress {
+  margin-top: 16px;
+}
+
+.update-progress-text {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.update-progress-pct {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  font-variant-numeric: tabular-nums;
 }
 </style>

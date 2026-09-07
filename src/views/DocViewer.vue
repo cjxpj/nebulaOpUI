@@ -30,6 +30,7 @@
               </span>
             </template>
           </ElInput>
+          <ElButton :icon="Download" @click="downloadDoc">下载文档</ElButton>
         </div>
         <!-- 搜索结果列表 -->
         <div v-if="searchText && matchCount > 0 && searchFocused" class="search-results">
@@ -49,14 +50,37 @@
 
       <!-- 主体区域 -->
       <div class="doc-body">
-        <div ref="contentRef" class="doc-content" v-html="displayHtml"></div>
+        <div class="doc-main">
+          <div
+            ref="contentRef"
+            class="doc-content"
+            v-html="displayHtml"
+            @scroll.passive="onContentScroll"
+          ></div>
+          <div class="chapter-nav">
+            <div class="chapter-nav-group">
+              <ElButton link :disabled="!hasPrev" @click="goChapter(-1)">
+                <ElIcon><ArrowLeft /></ElIcon>上一章
+              </ElButton>
+              <ElButton link :disabled="!hasNext" @click="goChapter(1)">
+                下一章<ElIcon><ArrowRight /></ElIcon>
+              </ElButton>
+            </div>
+            <span class="chapter-current" :title="curChapterName">{{ curChapterName }}</span>
+            <div class="chapter-nav-group">
+              <ElButton link :disabled="atDocTop" @click="backToTop">
+                回到顶部<ElIcon><Top /></ElIcon>
+              </ElButton>
+            </div>
+          </div>
+        </div>
         <aside v-if="!isMobile" class="toc-sidebar">
           <div class="toc-title">目录</div>
           <nav class="toc-nav">
             <a
-              v-for="item in tocItems"
+              v-for="(item, idx) in tocItems"
               :key="item.id"
-              :class="['toc-item', 'toc-' + item.level]"
+              :class="['toc-item', 'toc-' + item.level, { active: idx === activeTocIdx }]"
               :href="'#' + item.id"
               @click.prevent="scrollToHeading(item.id)"
             >
@@ -95,8 +119,8 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
-import { Search, ArrowUp, ArrowDown, List } from '@element-plus/icons-vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { Search, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Top, List, Download } from '@element-plus/icons-vue'
 import { apiPost } from '@/api.js'
 import { useMobile } from '@/composables/useMobile.js'
 import { getCachedDocHtml, setCachedDocHtml } from '@/docCache.js'
@@ -219,6 +243,99 @@ watch(searchText, (val, oldVal) => {
   })
 })
 
+/* ================= 目录跟随高亮 ================= */
+const activeTocIdx = ref(0)
+const curChapterIdx = ref(0)
+const atDocTop = ref(true)
+let headSpans = []
+let chapterIdxInSpans = []
+
+// 计算各标题在滚动内容中的纵向位置（内容重绘/尺寸变化后重建）
+function refreshSpans() {
+  headSpans = []
+  chapterIdxInSpans = []
+  const el = contentRef.value
+  if (!el || !el.querySelectorAll) return
+  const rect = el.getBoundingClientRect()
+  const heads = el.querySelectorAll('h1, h2, h3')
+  for (let i = 0; i < heads.length; i++) {
+    headSpans.push({ top: heads[i].getBoundingClientRect().top - rect.top + el.scrollTop })
+    if (heads[i].tagName === 'H2') chapterIdxInSpans.push(i)
+  }
+  syncNav()
+}
+
+// 滚动/重绘后同步：目录高亮、当前章节、回到顶部可用态
+function syncNav() {
+  const el = contentRef.value
+  if (!el) return
+  atDocTop.value = el.scrollTop < 8
+  if (!headSpans.length || !chapterIdxInSpans.length) {
+    activeTocIdx.value = 0
+    curChapterIdx.value = -1
+    return
+  }
+  const y = el.scrollTop + 96
+  const bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4
+
+  let h = 0
+  for (let i = 0; i < headSpans.length; i++) {
+    if (headSpans[i].top <= y) h = i
+  }
+  if (bottom) h = headSpans.length - 1
+  activeTocIdx.value = h
+
+  let ci = 0
+  for (let k = 0; k < chapterIdxInSpans.length; k++) {
+    if (headSpans[chapterIdxInSpans[k]].top <= y) ci = k
+  }
+  if (bottom) ci = chapterIdxInSpans.length - 1
+  curChapterIdx.value = ci
+}
+
+function onContentScroll() {
+  syncNav()
+}
+
+/* ================= 章节翻页 ================= */
+const chapters = computed(() => tocItems.value.filter((it) => it.level === 'h2'))
+const hasPrev = computed(() => curChapterIdx.value > 0)
+const hasNext = computed(
+  () => curChapterIdx.value >= 0 && curChapterIdx.value < chapters.value.length - 1
+)
+const curChapterName = computed(() =>
+  curChapterIdx.value >= 0 && chapters.value[curChapterIdx.value]
+    ? chapters.value[curChapterIdx.value].text
+    : '文档开始'
+)
+
+function goChapter(delta) {
+  const el = contentRef.value
+  if (!el) return
+  if (!headSpans.length || !chapterIdxInSpans.length) refreshSpans()
+  if (!chapterIdxInSpans.length || !chapters.value.length) return
+  const ci = Math.min(Math.max(curChapterIdx.value + delta, 0), chapters.value.length - 1)
+  const target = headSpans[chapterIdxInSpans[ci]]
+  el.scrollTo({ top: Math.max(target.top - 84, 0), behavior: 'smooth' })
+}
+
+function backToTop() {
+  const el = contentRef.value
+  if (el) el.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+/* ================= 内容变化时重建标题定位 ================= */
+function refreshDocNav() {
+  nextTick(refreshSpans)
+}
+watch(docHtml, refreshDocNav)
+watch(searchText, refreshDocNav)
+onMounted(() => {
+  window.addEventListener('resize', refreshDocNav)
+  nextTick(refreshSpans)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', refreshDocNav))
+
 /* ================= 加载文档 ================= */
 async function fetchDoc() {
   if (getCachedDocHtml() !== null) {
@@ -238,6 +355,24 @@ async function fetchDoc() {
 }
 
 onMounted(fetchDoc)
+
+/* ================= 下载文档 ================= */
+async function downloadDoc() {
+  try {
+    const data = await apiPost({ type: 'get_dic_doc_raw' })
+    const blob = new Blob([data.content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'dic.md'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error('下载文档失败: ' + e.message)
+  }
+}
 </script>
 
 <style scoped>
@@ -258,10 +393,13 @@ onMounted(fetchDoc)
 
 .search-row {
   max-width: 500px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .search-input {
-  width: 100%;
+  flex: 1;
 }
 
 .match-nav {
@@ -343,6 +481,14 @@ onMounted(fetchDoc)
   position: relative;
 }
 
+.doc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .doc-content {
   flex: 1;
   min-width: 0;
@@ -350,6 +496,37 @@ onMounted(fetchDoc)
   font-size: 14px;
   line-height: 1.7;
   padding-right: 8px;
+}
+
+/* ===== 章节翻页条 ===== */
+.chapter-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.chapter-nav-group {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chapter-nav-group :deep(.el-button) {
+  font-size: 13px;
+}
+
+.chapter-current {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .doc-content :deep(h1) { font-size: 22px; margin: 16px 0 8px; }
@@ -399,6 +576,11 @@ onMounted(fetchDoc)
 
 .toc-item:hover {
   color: var(--el-color-primary, #409eff);
+}
+
+.toc-item.active {
+  color: var(--el-color-primary, #409eff);
+  background: var(--el-fill-color-light, #f5f7fa);
 }
 
 .toc-h1 { font-weight: 600; }
@@ -478,6 +660,21 @@ onMounted(fetchDoc)
   .doc-content :deep(pre) { padding: 8px; font-size: 12px; }
   .doc-content :deep(table) { font-size: 12px; }
   .doc-content :deep(th), .doc-content :deep(td) { padding: 4px 8px; }
+
+  .chapter-nav {
+    gap: 8px;
+    padding: 8px 2px 0;
+  }
+
+  .chapter-nav-group :deep(.el-button) {
+    font-size: 12px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .chapter-current {
+    font-size: 11px;
+  }
 }
 </style>
 

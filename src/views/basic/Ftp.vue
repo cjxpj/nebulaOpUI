@@ -150,13 +150,7 @@ onMounted(loadConfig)
 
 <template>
   <div class="page">
-    <div class="page-header">
-      <h2 class="page-title">FTP 控制面板</h2>
-      <p class="page-subtitle">管理 FTP 文件服务配置</p>
-    </div>
-
-    <div class="panel-card">
-      <div class="firewall-notice">
+    <div class="firewall-notice">
         <h4 class="notice-title">注意事项</h4>
         <ul class="notice-list">
           <li>请确保防火墙已开放<strong>连接端口</strong>（默认 21），用于 FTP 控制指令传输</li>
@@ -170,6 +164,7 @@ onMounted(loadConfig)
           <ElSwitch
             v-model="form.open"
             :disabled="loadFailed"
+            inline-prompt
             active-text="开启"
             inactive-text="关闭"
             @change="onToggleOpen"
@@ -183,6 +178,7 @@ onMounted(loadConfig)
           <ElSwitch
             v-model="form.tls"
             :disabled="loadFailed"
+            inline-prompt
             active-text="开启"
             inactive-text="关闭"
             @change="onToggleTls"
@@ -263,6 +259,7 @@ onMounted(loadConfig)
           <ElSwitch
             v-model="form.debug"
             :disabled="loadFailed"
+            inline-prompt
             active-text="开启"
             inactive-text="关闭"
           />
@@ -280,44 +277,12 @@ onMounted(loadConfig)
           </div>
         </ElFormItem>
       </ElForm>
-    </div>
   </div>
 </template>
 
 <style scoped>
 .page {
   width: 100%;
-}
-
-.page-header {
-  margin-bottom: 24px;
-}
-
-.page-title {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: -0.3px;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.panel-card {
-  padding: 28px 32px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
-  transition: border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.panel-card:hover {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 .form-actions {
@@ -328,6 +293,7 @@ onMounted(loadConfig)
 
 .form-hint {
     margin-top: 4px;
+    flex-basis: 100%;
     font-size: 12px;
     color: var(--el-text-color-secondary);
   }
@@ -382,35 +348,9 @@ onMounted(loadConfig)
   }
  
  @media (max-width: 768px) {
-  .panel-card {
-    padding: 20px 16px;
-  }
-
-  .page-title {
-    font-size: 18px;
-  }
-
   .form-actions :deep(.el-button) {
     width: 100%;
   }
 }
 
-@media (max-width: 480px) {
-  .panel-card {
-    padding: 16px 12px;
-    border-radius: 8px;
-  }
-
-  .page-header {
-    margin-bottom: 16px;
-  }
-
-  .page-title {
-    font-size: 16px;
-  }
-
-  .page-subtitle {
-    font-size: 12px;
-  }
-}
 </style>

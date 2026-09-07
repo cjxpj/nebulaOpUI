@@ -223,6 +223,8 @@ function doConnect() {
               } else {
                 wsAuthenticated = false
                 settle(reject, new Error('密钥验证失败'))
+                // 密钥错误：清除密钥并退回登录页（区别于网络错误，后者交由重连机制处理）
+                handleUnauthorized()
               }
             },
             reject: (err) => {
